@@ -1,2 +1,6 @@
 import './style.css';
-import './game.js';
+import { Game } from './modules/Game.js';
+
+window.addEventListener('DOMContentLoaded', () => {
+    new Game();
+});
