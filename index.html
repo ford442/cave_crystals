@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crystal Cave Spore Hunter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="uiLayer">
+            <div class="hud-panel">
+                <div id="scoreBoard">Score: <span id="scoreVal">0</span></div>
+                <div id="levelBoard">Level: <span id="levelVal">1</span></div>
+            </div>
+            <div id="nextSporeContainer">
+                <div class="label">NEXT SPORE</div>
+                <div id="nextSporePreview"></div>
+            </div>
+        </div>
+
+        <div id="startScreen">
+            <h1>CRYSTAL<br>CAVE</h1>
+            <p>Crystals are growing from the roof and floor!<br>
+            Shoot glowing spores into the gaps.<br>
+            <strong>Match colors</strong> to harvest crystals.<br>
+            <strong>Mistakes</strong> make them grow faster.<br>
+            Don't let the cave close up!</p>
+            <button id="startBtn">ENTER CAVE</button>
+        </div>
+
+        <div id="gameOverScreen" class="hidden">
+            <h1>CAVE IN!</h1>
+            <p>The crystals have closed the path.</p>
+            <p>Final Score: <span id="finalScore" style="color: #00ffff;">0</span></p>
+            <button id="restartBtn">TRY AGAIN</button>
+        </div>
+    </div>
+
+    <!-- Load the game logic at the end -->
+    <script src="game.js"></script>
+</body>
+</html>
