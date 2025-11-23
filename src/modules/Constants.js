@@ -8,7 +8,7 @@ export const COLORS = [
 
 export const GAME_CONFIG = {
     lanes: 7,
-    baseGrowthRate: 0.1,
+    baseGrowthRate: 0.13,
     sporeExpandRate: 8,
     maxSporeSize: 60,
     penaltyGrowth: 40,
