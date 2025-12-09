@@ -5,9 +5,8 @@ body {
     overflow: hidden;
     font-family: 'Righteous', cursive;
     touch-action: none; /* Prevent zoom/scroll on mobile */
-    background-image: url('image_b9663e.jpg');
-    background-size: cover;
-    background-position: center;
+    /* Background handled by WebGL canvas now */
+    background-color: #000;
     background-attachment: fixed;
 }
 
@@ -22,6 +21,17 @@ body {
 
 canvas {
     display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#bgCanvas {
+    z-index: 0;
+}
+
+#gameCanvas {
+    z-index: 1;
 }
 
 #uiLayer {

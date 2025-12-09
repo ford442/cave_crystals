@@ -1,21 +1,35 @@
-Crystal Cave Spore Hunter
+# Crystal Cave Spore Hunter
 
-A procedural arcade shooter built with HTML5 Canvas and the Web Audio API.
+A procedural arcade shooter built with HTML5 Canvas, WebGL, and the Web Audio API.
 
-How to Run
+## Features
 
-Download this repository.
+- **Procedural Graphics**: Crystals and Spores are rendered using advanced Canvas 2D techniques with gradients and lighting.
+- **Dynamic Background**: A custom WebGL shader renders a deep, misty cave environment.
+- **Audio**: Sound effects are synthesized in real-time using the Web Audio API.
+- **Modern Build**: Built with Vite as a modular ES6 application.
 
-Ensure the background image image_b9663e.jpg is in the same folder.
+## How to Run
 
-Open index.html in your web browser.
+1.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-Note: For the best experience, use a local development server (like the Live Server extension in VS Code) to ensure all assets load correctly.
+2.  **Start Development Server**:
+    ```bash
+    npm run dev
+    ```
+    Open the URL shown in the terminal (usually `http://localhost:5173`).
 
-Project Structure
+3.  **Build for Production**:
+    ```bash
+    npm run build
+    ```
+    The output will be in the `dist/` directory.
 
-index.html: Main HTML structure and UI containers.
+## Controls
 
-style.css: Styling for the HUD, menus, and canvas.
-
-game.js: Contains the Game Loop, Logic, Rendering, and Audio System.
+- **Mouse/Touch**: Move horizontally to aim.
+- **Click/Tap**: Shoot a spore.
+- **Objective**: Match the spore color to the crystal color to reduce its height. If they touch the ceiling or floor, it's Game Over!
