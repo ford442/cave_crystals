@@ -72,10 +72,12 @@ Transform Cave Crystals into a more engaging and polished casual game by adding 
 
 ### Music System
 - [ ] **Procedural Background Music**
-  - Generate ambient cave music using Web Audio API
-  - Music intensity increases with difficulty/danger
-  - Smooth transitions between calm and intense states
-  - Musical notes tied to successful matches (player creates melody)
+  - Generate ambient cave music using Web Audio API oscillators and filters
+  - Use layered sine/triangle waves with reverb for atmospheric drone
+  - Music intensity increases with difficulty/danger (add layers, increase tempo)
+  - Smooth transitions between calm and intense states via gain envelopes
+  - Musical notes tied to successful matches (player creates melody on top of ambient base)
+  - Option: Pre-composed short loops with Web Audio API processing for richer sound
 
 - [ ] **Adaptive Audio**
   - Dynamic music that responds to game state
@@ -162,10 +164,11 @@ Transform Cave Crystals into a more engaging and polished casual game by adding 
   - Performance optimization for mobile devices
   - Fullscreen mode on mobile
 
-- [ ] **PWA Features**
+- [ ] **PWA Features** (requires service worker + manifest.json)
   - Install as standalone app
-  - Offline gameplay support
-  - App icon and splash screen
+  - Offline gameplay support via service worker caching
+  - App icon and splash screen (multiple sizes)
+  - Add to home screen prompt
 
 ---
 
@@ -196,7 +199,7 @@ Transform Cave Crystals into a more engaging and polished casual game by adding 
 1. Daily challenges
 2. Boss levels
 3. Advanced power-ups
-4. PWA features
+4. PWA features (requires service worker manifest.json, icons)
 5. Social features (if desired)
 
 ---
