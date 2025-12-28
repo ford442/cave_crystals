@@ -106,21 +106,22 @@ export class Renderer {
         const col = COLORS[c.colorIdx];
         const seed = c.shapeSeed;
 
-        // Setup styles
+        // Enhanced glow effect
         if (c.flash > 0) {
-            this.ctx.shadowBlur = 30 * c.flash;
+            this.ctx.shadowBlur = 50 * c.flash;
             this.ctx.shadowColor = 'white';
             this.ctx.fillStyle = '#fff';
             this.ctx.strokeStyle = '#fff';
         } else {
-            this.ctx.shadowBlur = 25;
+            this.ctx.shadowBlur = 35;
             this.ctx.shadowColor = col.glow;
-            this.ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+            this.ctx.strokeStyle = 'rgba(255,255,255,0.8)';
         }
-        this.ctx.lineWidth = 1.5;
-        this.ctx.lineJoin = 'round';
+        const baseLineWidth = 2;
+        this.ctx.lineWidth = baseLineWidth;
+        this.ctx.lineJoin = 'miter';
 
-        const drawShard = (offsetX, hScale, wScale, tilt) => {
+        const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
             const h = c.height * hScale;
             const w = width * wScale;
             const halfW = w / 2;
@@ -128,56 +129,180 @@ export class Renderer {
             const tipY = (c.type === 'top') ? h : this.height - h;
             const cx = xCenter + offsetX;
 
-            // Gradient for depth
-            const grad = this.ctx.createLinearGradient(cx, baseY, cx, tipY);
+            // Enhanced gradient with more depth
+            const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
             if (c.flash > 0) {
                  grad.addColorStop(0, '#fff');
+                 grad.addColorStop(0.5, '#fff');
                  grad.addColorStop(1, '#fff');
             } else {
+                 // More vibrant color gradient
                  grad.addColorStop(0, col.hex);
-                 grad.addColorStop(1, 'rgba(0,0,0,0.1)'); // Darken at tip or base
+                 grad.addColorStop(0.4, col.hex);
+                 grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
+                 grad.addColorStop(1, 'rgba(0,0,0,0.2)');
             }
             this.ctx.fillStyle = grad;
 
+            // Draw main crystal shape with more facets
             this.ctx.beginPath();
 
-            if (c.type === 'top') {
-                this.ctx.moveTo(cx - halfW, baseY);
-                this.ctx.lineTo(cx + tilt, tipY);
-                this.ctx.lineTo(cx + halfW, baseY);
+            if (facetStyle === 'multifacet') {
+                // Create a more complex, multi-faceted shape
+                const segments = 5;
+                const angleVariation = tilt / segments;
+                
+                if (c.type === 'top') {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    for (let i = 1; i < segments; i++) {
+                        const progress = i / segments;
+                        const yPos = baseY + (tipY - baseY) * progress;
+                        const xOffset = Math.sin(progress * Math.PI) * angleVariation;
+                        this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
+                    }
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    for (let i = segments - 1; i > 0; i--) {
+                        const progress = i / segments;
+                        const yPos = baseY + (tipY - baseY) * progress;
+                        const xOffset = -Math.sin(progress * Math.PI) * angleVariation;
+                        this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
+                    }
+                    this.ctx.lineTo(cx + halfW, baseY);
+                } else {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    for (let i = 1; i < segments; i++) {
+                        const progress = i / segments;
+                        const yPos = baseY - (baseY - tipY) * progress;
+                        const xOffset = Math.sin(progress * Math.PI) * angleVariation;
+                        this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
+                    }
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    for (let i = segments - 1; i > 0; i--) {
+                        const progress = i / segments;
+                        const yPos = baseY - (baseY - tipY) * progress;
+                        const xOffset = -Math.sin(progress * Math.PI) * angleVariation;
+                        this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
+                    }
+                    this.ctx.lineTo(cx + halfW, baseY);
+                }
             } else {
-                this.ctx.moveTo(cx - halfW, baseY);
-                this.ctx.lineTo(cx + tilt, tipY);
-                this.ctx.lineTo(cx + halfW, baseY);
+                // Standard triangular shape
+                if (c.type === 'top') {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    this.ctx.lineTo(cx + halfW, baseY);
+                } else {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    this.ctx.lineTo(cx + halfW, baseY);
+                }
             }
 
             this.ctx.fill();
             this.ctx.stroke();
 
-            // Inner Facet for "3D" look
+            // Enhanced internal facets with multiple layers
             if (c.flash < 0.5) {
-                this.ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                // Primary highlight facet
+                this.ctx.fillStyle = 'rgba(255,255,255,0.3)';
                 this.ctx.beginPath();
-                this.ctx.moveTo(cx - halfW*0.5, baseY);
+                this.ctx.moveTo(cx - halfW*0.6, baseY);
                 if (c.type === 'top') {
-                    this.ctx.lineTo(cx + tilt*0.5, tipY * 0.8);
+                    this.ctx.lineTo(cx + tilt*0.3, tipY * 0.6);
                 } else {
-                    this.ctx.lineTo(cx + tilt*0.5, this.height - ((this.height-tipY)*0.8));
+                    this.ctx.lineTo(cx + tilt*0.3, this.height - ((this.height-tipY)*0.6));
                 }
-                this.ctx.lineTo(cx + halfW*0.5, baseY);
+                this.ctx.lineTo(cx + halfW*0.2, baseY);
                 this.ctx.fill();
+
+                // Secondary highlight for crystalline effect
+                this.ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx + halfW*0.2, baseY);
+                if (c.type === 'top') {
+                    this.ctx.lineTo(cx + tilt*0.7, tipY * 0.75);
+                } else {
+                    this.ctx.lineTo(cx + tilt*0.7, this.height - ((this.height-tipY)*0.75));
+                }
+                this.ctx.lineTo(cx + halfW*0.6, baseY);
+                this.ctx.fill();
+
+                // Internal crystalline structure lines
+                this.ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                const midY = c.type === 'top' ? tipY * 0.5 : this.height - ((this.height-tipY)*0.5);
+                this.ctx.moveTo(cx - halfW*0.3, baseY);
+                this.ctx.lineTo(cx + tilt*0.5, midY);
+                this.ctx.lineTo(cx + halfW*0.3, baseY);
+                this.ctx.stroke();
+                this.ctx.lineWidth = baseLineWidth;
             }
         };
 
-        if (seed > 0.3) {
-            drawShard(-width * 0.35, 0.6, 0.4, -5);
-        }
-        if (seed < 0.7) {
-            drawShard(width * 0.35, 0.5, 0.4, 5);
-        }
+        // More strategic and varied shard arrangement based on seed
+        const shardConfigs = [
+            // Configuration 1: Symmetric cluster
+            { condition: seed < 0.2, shards: [
+                { offsetX: -width * 0.4, hScale: 0.65, wScale: 0.35, tilt: -8, facetStyle: 'standard' },
+                { offsetX: width * 0.4, hScale: 0.65, wScale: 0.35, tilt: 8, facetStyle: 'standard' },
+                { offsetX: 0, hScale: 1.0, wScale: 0.65, tilt: 0, facetStyle: 'multifacet' }
+            ]},
+            // Configuration 2: Asymmetric left-heavy
+            { condition: seed >= 0.2 && seed < 0.4, shards: [
+                { offsetX: -width * 0.45, hScale: 0.75, wScale: 0.4, tilt: -12, facetStyle: 'multifacet' },
+                { offsetX: -width * 0.15, hScale: 0.55, wScale: 0.3, tilt: -5, facetStyle: 'standard' },
+                { offsetX: width * 0.25, hScale: 0.5, wScale: 0.3, tilt: 6, facetStyle: 'standard' },
+                { offsetX: 0, hScale: 1.0, wScale: 0.6, tilt: -3, facetStyle: 'multifacet' }
+            ]},
+            // Configuration 3: Asymmetric right-heavy
+            { condition: seed >= 0.4 && seed < 0.6, shards: [
+                { offsetX: -width * 0.25, hScale: 0.5, wScale: 0.3, tilt: -6, facetStyle: 'standard' },
+                { offsetX: width * 0.15, hScale: 0.55, wScale: 0.3, tilt: 5, facetStyle: 'standard' },
+                { offsetX: width * 0.45, hScale: 0.75, wScale: 0.4, tilt: 12, facetStyle: 'multifacet' },
+                { offsetX: 0, hScale: 1.0, wScale: 0.6, tilt: 3, facetStyle: 'multifacet' }
+            ]},
+            // Configuration 4: Triple spire
+            { condition: seed >= 0.6 && seed < 0.8, shards: [
+                { offsetX: -width * 0.35, hScale: 0.8, wScale: 0.38, tilt: -7, facetStyle: 'multifacet' },
+                { offsetX: 0, hScale: 1.0, wScale: 0.55, tilt: 0, facetStyle: 'multifacet' },
+                { offsetX: width * 0.35, hScale: 0.8, wScale: 0.38, tilt: 7, facetStyle: 'multifacet' }
+            ]},
+            // Configuration 5: Dense cluster
+            { condition: seed >= 0.8, shards: [
+                { offsetX: -width * 0.4, hScale: 0.6, wScale: 0.35, tilt: -10, facetStyle: 'standard' },
+                { offsetX: -width * 0.15, hScale: 0.7, wScale: 0.3, tilt: -4, facetStyle: 'standard' },
+                { offsetX: width * 0.15, hScale: 0.7, wScale: 0.3, tilt: 4, facetStyle: 'standard' },
+                { offsetX: width * 0.4, hScale: 0.6, wScale: 0.35, tilt: 10, facetStyle: 'standard' },
+                { offsetX: 0, hScale: 1.0, wScale: 0.6, tilt: 0, facetStyle: 'multifacet' }
+            ]}
+        ];
 
-        drawShard(0, 1.0, 0.6, 0);
+        // Find and render the appropriate configuration
+        const config = shardConfigs.find(cfg => cfg.condition) || shardConfigs[0]; // Fallback to first config
+        config.shards.forEach(shard => {
+            drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
+        });
 
         this.ctx.shadowBlur = 0;
+    }
+
+    darkenColor(hex, amount) {
+        // Helper to darken a hex color
+        const rgb = this.hexToRgb(hex);
+        if (!rgb) return hex;
+        const r = Math.max(0, Math.floor(rgb.r * (1 - amount)));
+        const g = Math.max(0, Math.floor(rgb.g * (1 - amount)));
+        const b = Math.max(0, Math.floor(rgb.b * (1 - amount)));
+        return `rgb(${r},${g},${b})`;
+    }
+
+    hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
     }
 }
