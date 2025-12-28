@@ -117,7 +117,8 @@ export class Renderer {
             this.ctx.shadowColor = col.glow;
             this.ctx.strokeStyle = 'rgba(255,255,255,0.8)';
         }
-        this.ctx.lineWidth = 2;
+        const baseLineWidth = 2;
+        this.ctx.lineWidth = baseLineWidth;
         this.ctx.lineJoin = 'miter';
 
         const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
@@ -235,7 +236,7 @@ export class Renderer {
                 this.ctx.lineTo(cx + tilt*0.5, midY);
                 this.ctx.lineTo(cx + halfW*0.3, baseY);
                 this.ctx.stroke();
-                this.ctx.lineWidth = 2;
+                this.ctx.lineWidth = baseLineWidth;
             }
         };
 
@@ -278,12 +279,10 @@ export class Renderer {
         ];
 
         // Find and render the appropriate configuration
-        const config = shardConfigs.find(cfg => cfg.condition);
-        if (config) {
-            config.shards.forEach(shard => {
-                drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
-            });
-        }
+        const config = shardConfigs.find(cfg => cfg.condition) || shardConfigs[0]; // Fallback to first config
+        config.shards.forEach(shard => {
+            drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
+        });
 
         this.ctx.shadowBlur = 0;
     }
