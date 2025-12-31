@@ -65,12 +65,13 @@ export function isParticleAlive(life: f64): bool {
 /**
  * Batch process multiple particles
  * This is optimized for processing many particles at once
+ * Currently a placeholder for future batch optimization
  */
 export function batchUpdateParticles(
     count: i32,
     lifeDecay: f64
-): void {
-    // Simplified batch processing
+): i32 {
+    // Returns the count for validation
     // In a real implementation, this would work with shared memory
-    // For now, this serves as a placeholder for future optimization
+    return count;
 }

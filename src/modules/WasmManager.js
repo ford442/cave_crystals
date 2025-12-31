@@ -41,7 +41,8 @@ export class WasmManager {
             this.ready = true;
 
             // Initialize with a random seed
-            const seed = Math.floor(Math.random() * 0xffffffff);
+            const MAX_UINT32 = 0xffffffff;
+            const seed = Math.floor(Math.random() * MAX_UINT32);
             if (this.exports.setSeed) {
                 this.exports.setSeed(seed);
             }
@@ -74,7 +75,6 @@ export class WasmManager {
 
         try {
             const result = this.exports.checkCollisions(
-                spore.x,
                 spore.y,
                 spore.radius,
                 spore.lane,

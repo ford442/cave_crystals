@@ -32,6 +32,9 @@ export function calculateSporeExpansion(currentRadius: f64, expandRate: f64): f6
     return currentRadius + expandRate;
 }
 
+// Constants for random seed management
+const MAX_UINT32: u32 = 0xffffffff;
+
 /**
  * Fast random number generation (Linear Congruential Generator)
  * For better performance than calling back to JS

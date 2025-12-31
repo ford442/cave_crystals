@@ -45,7 +45,6 @@ export const COLLISION_BOTTOM_MATCH: u32 = 8;
  * Returns bit flags indicating collision results
  */
 export function checkCollisions(
-    sporeX: f64,
     sporeY: f64,
     sporeRadius: f64,
     sporeLane: i32,
