@@ -3,6 +3,7 @@ import { SoundManager } from './Audio.js';
 import { Crystal, Spore, Particle } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
+import { wasmManager } from './WasmManager.js';
 
 export class Game {
     constructor() {
@@ -33,6 +34,13 @@ export class Game {
             mouseLane: 3,
             growthMultiplier: 1
         };
+
+        // Initialize WASM asynchronously
+        wasmManager.init().then(() => {
+            console.log('WASM module initialization complete');
+        }).catch(err => {
+            console.warn('WASM initialization failed, using JavaScript fallback:', err);
+        });
 
         this.bindEvents();
         this.resize();
@@ -121,8 +129,8 @@ export class Game {
     }
 
     update(dt) {
-        this.state.growthMultiplier = 1 + (this.state.score / 500);
-        const currentGrowth = GAME_CONFIG.baseGrowthRate * this.state.growthMultiplier;
+        this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);
+        const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
 
         let gameOver = false;
 
@@ -130,7 +138,7 @@ export class Game {
             c.update(currentGrowth);
             const opposite = this.state.crystals.find(oc => oc.lane === c.lane && oc.type !== c.type);
             if (opposite) {
-                if (c.height + opposite.height >= this.renderer.height) {
+                if (wasmManager.checkCrystalGameOver(c.height, opposite.height, this.renderer.height)) {
                     gameOver = true;
                 }
             }

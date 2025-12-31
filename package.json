@@ -3,14 +3,19 @@
   "version": "1.0.0",
   "description": "A procedural arcade shooter",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "asbuild:debug": "asc src/assembly/index.ts --target debug",
+    "asbuild:release": "asc src/assembly/index.ts --target release",
+    "asbuild": "npm run asbuild:debug && npm run asbuild:release",
+    "dev": "npm run asbuild && vite",
+    "build": "npm run asbuild && vite build",
     "preview": "vite preview"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@assemblyscript/loader": "^0.28.9",
+    "assemblyscript": "^0.28.9",
     "vite": "^5.0.0"
   }
 }

@@ -1,5 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
+import { wasmManager } from './WasmManager.js';
 
 export class Crystal {
     constructor(lane, type, height, colorIdx) {
@@ -37,39 +38,39 @@ export class Spore {
 
         if (!topCry || !botCry) return;
 
-        const topHit = this.y - this.radius < topCry.height;
-        const botHit = this.y + this.radius > height - botCry.height;
+        // Use WASM for collision detection
+        const collision = wasmManager.checkCollisions(this, topCry, botCry, height);
 
         let hitOccurred = false;
 
-        if (topHit) {
+        if (collision.topHit) {
             hitOccurred = true;
-            if (this.colorIdx === topCry.colorIdx) {
+            if (collision.topMatch) {
                 SoundManager.match();
-                topCry.height = Math.max(10, topCry.height - GAME_CONFIG.matchShrink);
+                topCry.height = wasmManager.calculateMatchHeight(topCry.height, GAME_CONFIG.matchShrink, 10);
                 topCry.flash = 1;
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 20);
                 scoreCallback(10);
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
-                topCry.height += GAME_CONFIG.penaltyGrowth;
+                topCry.height = wasmManager.calculatePenaltyHeight(topCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, topCry.height, '#555', 5);
             }
         }
 
-        if (botHit) {
+        if (collision.bottomHit) {
             hitOccurred = true;
-            if (this.colorIdx === botCry.colorIdx) {
+            if (collision.bottomMatch) {
                 SoundManager.match();
-                botCry.height = Math.max(10, botCry.height - GAME_CONFIG.matchShrink);
+                botCry.height = wasmManager.calculateMatchHeight(botCry.height, GAME_CONFIG.matchShrink, 10);
                 botCry.flash = 1;
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 20);
                 scoreCallback(10);
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
-                botCry.height += GAME_CONFIG.penaltyGrowth;
+                botCry.height = wasmManager.calculatePenaltyHeight(botCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, height - botCry.height, '#555', 5);
             }
         }
