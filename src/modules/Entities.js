@@ -50,12 +50,13 @@ export class Spore {
                 topCry.height = wasmManager.calculateMatchHeight(topCry.height, GAME_CONFIG.matchShrink, 10);
                 topCry.flash = 1;
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 20);
-                scoreCallback(10);
+                scoreCallback(10, true);
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
                 topCry.height = wasmManager.calculatePenaltyHeight(topCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, topCry.height, '#555', 5);
+                scoreCallback(0, false);
             }
         }
 
@@ -66,12 +67,13 @@ export class Spore {
                 botCry.height = wasmManager.calculateMatchHeight(botCry.height, GAME_CONFIG.matchShrink, 10);
                 botCry.flash = 1;
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 20);
-                scoreCallback(10);
+                scoreCallback(10, true);
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
                 botCry.height = wasmManager.calculatePenaltyHeight(botCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, height - botCry.height, '#555', 5);
+                scoreCallback(0, false);
             }
         }
 
@@ -85,16 +87,34 @@ export class Particle {
     constructor(x, y, color) {
         this.x = x;
         this.y = y;
-        this.vx = (Math.random() - 0.5) * 10;
-        this.vy = (Math.random() - 0.5) * 10;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 5 + 2;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
         this.life = 1.0;
+        this.maxLife = 1.0;
         this.color = color;
-        this.size = Math.random() * 4 + 1;
+        this.size = Math.random() * 6 + 2;
+
+        // Juice properties
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+        this.gravity = 0.15;
+        this.friction = 0.96;
     }
 
     update() {
+        // Apply physics
         this.x += this.vx;
         this.y += this.vy;
-        this.life -= 0.02;
+        this.vy += this.gravity;
+        this.vx *= this.friction;
+        this.vy *= this.friction;
+
+        // Update rotation
+        this.rotation += this.rotationSpeed;
+
+        // Decay
+        this.life -= 0.015;
     }
 }

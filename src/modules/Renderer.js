@@ -24,11 +24,21 @@ export class Renderer {
     draw(gameState) {
         if (!this.ctx) return;
         this.clear();
+
+        this.ctx.save();
+        if (gameState.shake > 0) {
+            const dx = (Math.random() - 0.5) * gameState.shake;
+            const dy = (Math.random() - 0.5) * gameState.shake;
+            this.ctx.translate(dx, dy);
+        }
+
         this.drawGuides();
         gameState.crystals.forEach(c => this.drawComplexCrystal(c));
         this.drawCursor(gameState);
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => this.drawParticle(p));
+
+        this.ctx.restore();
     }
 
     drawGuides() {
@@ -89,13 +99,28 @@ export class Renderer {
     }
 
     drawParticle(p) {
-        this.ctx.globalAlpha = p.life;
-        this.ctx.shadowBlur = 10 * p.life;
-        this.ctx.shadowColor = p.color;
+        const alpha = p.life / p.maxLife; // Normalize alpha
+        this.ctx.globalAlpha = alpha;
+
+        this.ctx.save();
+        this.ctx.translate(p.x, p.y);
+        this.ctx.rotate(p.rotation);
+
+        // Draw shard shape instead of circle
         this.ctx.fillStyle = p.color;
+        this.ctx.shadowBlur = 10 * alpha;
+        this.ctx.shadowColor = p.color;
+
         this.ctx.beginPath();
-        this.ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+        const s = p.size * alpha; // Scale down with life
+        this.ctx.moveTo(0, -s);
+        this.ctx.lineTo(s * 0.8, s * 0.8);
+        this.ctx.lineTo(-s * 0.8, s * 0.8);
+        this.ctx.closePath();
         this.ctx.fill();
+
+        this.ctx.restore();
+
         this.ctx.shadowBlur = 0;
         this.ctx.globalAlpha = 1.0;
     }
