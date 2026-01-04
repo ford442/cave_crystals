@@ -32,7 +32,9 @@ export class Game {
             particles: [],
             nextSporeColorIdx: 0,
             mouseLane: 3,
-            growthMultiplier: 1
+            growthMultiplier: 1,
+            shake: 0,
+            displayScore: 0
         };
 
         // Initialize WASM asynchronously
@@ -129,6 +131,18 @@ export class Game {
     }
 
     update(dt) {
+        // Shake decay
+        if (this.state.shake > 0) {
+            this.state.shake *= 0.9;
+            if (this.state.shake < 0.5) this.state.shake = 0;
+        }
+
+        // Score lerp
+        this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
+        if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
+            this.state.displayScore = this.state.score;
+        }
+
         this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);
         const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
 
@@ -155,8 +169,14 @@ export class Game {
         // Update Spores
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
-            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points) => {
+            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch) => {
                 this.state.score += points;
+                if (isMatch) {
+                    this.state.shake = 10;
+                } else if (points === 0) {
+                    // Mismatch
+                    this.state.shake = 20;
+                }
             });
             if (!s.active) {
                 this.state.spores.splice(i, 1);
@@ -173,8 +193,12 @@ export class Game {
     }
 
     updateUI() {
-        this.ui.score.innerText = this.state.score;
+        this.ui.score.innerText = Math.floor(this.state.displayScore);
         this.ui.level.innerText = Math.floor(this.state.score / 500) + 1;
+
+        // Scale pulse effect on score if recently changed
+        const scale = 1.0 + (this.state.shake * 0.01);
+        this.ui.score.style.transform = `scale(${scale})`;
 
         const nextCol = COLORS[this.state.nextSporeColorIdx];
         this.ui.preview.style.backgroundColor = nextCol.hex;
