@@ -34,7 +34,8 @@ export class Game {
             mouseLane: 3,
             growthMultiplier: 1,
             shake: 0,
-            displayScore: 0
+            displayScore: 0,
+            impactFlash: 0
         };
 
         // Initialize WASM asynchronously
@@ -72,6 +73,7 @@ export class Game {
         this.state.spores = [];
         this.state.particles = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
+        this.state.impactFlash = 0;
 
         this.ui.start.classList.add('hidden');
         this.ui.gameOver.classList.add('hidden');
@@ -124,9 +126,14 @@ export class Game {
         this.updateUI();
     }
 
-    createParticles(x, y, color, count = 10) {
+    createParticles(x, y, color, count = 20) {
+        const speed = 8.0;
         for(let i=0; i<count; i++) {
-            this.state.particles.push(new Particle(x, y, color));
+            // Use WASM for juicy explosion pattern
+            const vx = wasmManager.getShatterVx(i, count, speed);
+            const vy = wasmManager.getShatterVy(i, count, speed);
+
+            this.state.particles.push(new Particle(x, y, color, vx, vy));
         }
     }
 
@@ -135,6 +142,12 @@ export class Game {
         if (this.state.shake > 0) {
             this.state.shake *= 0.9;
             if (this.state.shake < 0.5) this.state.shake = 0;
+        }
+
+        // Impact Flash decay
+        if (this.state.impactFlash > 0) {
+            this.state.impactFlash -= 0.1;
+            if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
         // Score lerp
@@ -173,9 +186,11 @@ export class Game {
                 this.state.score += points;
                 if (isMatch) {
                     this.state.shake = 10;
+                    this.state.impactFlash = 0.5; // Flash screen on match
                 } else if (points === 0) {
                     // Mismatch
                     this.state.shake = 20;
+                    this.state.impactFlash = 0.2; // Small flash on error
                 }
             });
             if (!s.active) {
@@ -187,7 +202,7 @@ export class Game {
         // Update Particles
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
-            p.update();
+            p.update(this.renderer.height);
             if (p.life <= 0) this.state.particles.splice(i, 1);
         }
     }

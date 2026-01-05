@@ -75,3 +75,30 @@ export function batchUpdateParticles(
     // In a real implementation, this would work with shared memory
     return count;
 }
+
+/**
+ * Calculate X velocity for a shatter burst particle
+ * Distributes particles in a circle
+ */
+export function getShatterVx(index: i32, total: i32, force: f64): f64 {
+    const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
+    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    return Math.cos(angle) * force + randomVariation;
+}
+
+/**
+ * Calculate Y velocity for a shatter burst particle
+ * Distributes particles in a circle
+ */
+export function getShatterVy(index: i32, total: i32, force: f64): f64 {
+    const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
+    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    return Math.sin(angle) * force + randomVariation;
+}
+
+/**
+ * Calculate new vertical velocity after bouncing off floor
+ */
+export function getBounceVy(vy: f64, damping: f64): f64 {
+    return -vy * damping;
+}

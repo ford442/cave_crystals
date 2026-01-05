@@ -168,6 +168,39 @@ export class WasmManager {
         }
         return height1 + height2 >= maxHeight;
     }
+
+    /**
+     * Calculate X velocity for particle shatter
+     */
+    getShatterVx(index, total, force) {
+        if (this.ready && this.exports.getShatterVx) {
+            return this.exports.getShatterVx(index, total, force);
+        }
+        // Fallback: Random angle
+        const angle = (index / total) * Math.PI * 2;
+        return Math.cos(angle) * force;
+    }
+
+    /**
+     * Calculate Y velocity for particle shatter
+     */
+    getShatterVy(index, total, force) {
+        if (this.ready && this.exports.getShatterVy) {
+            return this.exports.getShatterVy(index, total, force);
+        }
+        const angle = (index / total) * Math.PI * 2;
+        return Math.sin(angle) * force;
+    }
+
+    /**
+     * Calculate bounce Y velocity
+     */
+    getBounceVy(vy, damping) {
+        if (this.ready && this.exports.getBounceVy) {
+            return this.exports.getBounceVy(vy, damping);
+        }
+        return -vy * damping;
+    }
 }
 
 // Create and export a singleton instance

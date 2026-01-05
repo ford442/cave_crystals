@@ -39,6 +39,19 @@ export class Renderer {
         gameState.particles.forEach(p => this.drawParticle(p));
 
         this.ctx.restore();
+
+        // Draw Impact Flash (independent of shake translation)
+        if (gameState.impactFlash > 0) {
+            this.drawImpactFlash(gameState.impactFlash);
+        }
+    }
+
+    drawImpactFlash(intensity) {
+        this.ctx.save();
+        // Use 'lighter' or just alpha blend
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${intensity})`;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.restore();
     }
 
     drawGuides() {

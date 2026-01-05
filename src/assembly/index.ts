@@ -20,7 +20,10 @@ export {
     calculateParticleSize,
     updateParticlePosition,
     isParticleAlive,
-    batchUpdateParticles
+    batchUpdateParticles,
+    getShatterVx,
+    getShatterVy,
+    getBounceVy
 } from './particles';
 
 export {
