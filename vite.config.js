@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     target: 'esnext',
-    assetsInlineLimit: 0, // Don't inline WASM files
+    assetsInlineLimit: 0, base: './', // Don't inline WASM files
   },
   optimizeDeps: {
     exclude: ['@assemblyscript/loader']

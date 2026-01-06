@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle } from './Entities.js';
+import { Crystal, Spore, Particle, Shockwave } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -30,6 +30,7 @@ export class Game {
             crystals: [],
             spores: [],
             particles: [],
+            shockwaves: [],
             nextSporeColorIdx: 0,
             mouseLane: 3,
             growthMultiplier: 1,
@@ -72,6 +73,7 @@ export class Game {
         this.state.crystals = [];
         this.state.spores = [];
         this.state.particles = [];
+        this.state.shockwaves = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
@@ -137,6 +139,10 @@ export class Game {
         }
     }
 
+    createShockwave(x, y, color) {
+        this.state.shockwaves.push(new Shockwave(x, y, color));
+    }
+
     update(dt) {
         // Shake decay
         if (this.state.shake > 0) {
@@ -192,7 +198,7 @@ export class Game {
                     this.state.shake = 20;
                     this.state.impactFlash = 0.2; // Small flash on error
                 }
-            });
+            }, this.createShockwave.bind(this));
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();
@@ -204,6 +210,13 @@ export class Game {
             let p = this.state.particles[i];
             p.update(this.renderer.height);
             if (p.life <= 0) this.state.particles.splice(i, 1);
+        }
+
+        // Update Shockwaves
+        for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
+            let sw = this.state.shockwaves[i];
+            sw.update();
+            if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
         }
     }
 
