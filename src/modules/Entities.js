@@ -26,9 +26,11 @@ export class Spore {
         this.radius = 10;
         this.colorIdx = colorIdx;
         this.active = true;
+        this.spawnTime = Date.now(); // For elastic animation
+        this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback) {
+    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback) {
         if (!this.active) return;
 
         this.radius += GAME_CONFIG.sporeExpandRate;
@@ -51,6 +53,7 @@ export class Spore {
                 topCry.flash = 1;
                 // Create particles at impact point
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40);
+                if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true);
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
@@ -69,6 +72,7 @@ export class Spore {
                 botCry.flash = 1;
                 // Create particles at impact point
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40);
+                if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true);
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
@@ -138,5 +142,23 @@ export class Particle {
 
         // Decay
         this.life -= 0.015;
+    }
+}
+
+export class Shockwave {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.radius = 10;
+        this.maxRadius = 150;
+        this.life = 1.0;
+        this.width = 10;
+    }
+
+    update() {
+        this.radius += 10; // Expand fast
+        this.life -= 0.05; // Fade out
+        this.width = Math.max(0, this.width - 0.5);
     }
 }

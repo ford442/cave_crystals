@@ -26,6 +26,9 @@ export class Renderer {
         this.clear();
 
         this.ctx.save();
+
+        const isShaking = gameState.shake > 2;
+
         if (gameState.shake > 0) {
             const dx = (Math.random() - 0.5) * gameState.shake;
             const dy = (Math.random() - 0.5) * gameState.shake;
@@ -33,10 +36,35 @@ export class Renderer {
         }
 
         this.drawGuides();
-        gameState.crystals.forEach(c => this.drawComplexCrystal(c));
+
+        // Draw Crystals with Chromatic Aberration if shaking
+        gameState.crystals.forEach(c => {
+             if (isShaking) {
+                 this.ctx.globalCompositeOperation = 'screen';
+                 // Red Channel Offset
+                 this.ctx.save();
+                 this.ctx.translate(-3, 0);
+                 this.drawComplexCrystal(c, 'red');
+                 this.ctx.restore();
+
+                 // Blue Channel Offset
+                 this.ctx.save();
+                 this.ctx.translate(3, 0);
+                 this.drawComplexCrystal(c, 'blue');
+                 this.ctx.restore();
+
+                 this.ctx.globalCompositeOperation = 'source-over';
+             }
+             this.drawComplexCrystal(c);
+        });
+
         this.drawCursor(gameState);
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => this.drawParticle(p));
+
+        if (gameState.shockwaves) {
+            gameState.shockwaves.forEach(sw => this.drawShockwave(sw));
+        }
 
         this.ctx.restore();
 
@@ -87,28 +115,62 @@ export class Renderer {
     drawSpore(s) {
         const col = COLORS[s.colorIdx];
 
+        // Elastic Spawn Animation
+        // Determine "visual" radius vs logical radius
+        // Logical radius is s.radius
+        // We want a bounce effect.
+        // Assume spore expands linearly in logic.
+        // We add a wobble based on time.
+
+        const time = Date.now() / 100;
+        const wobble = Math.sin(time * 20) * 2; // High frequency wobble
+
+        // Elastic spawn scale
+        let scale = 1.0;
+        if (s.spawnTime) {
+            const age = (Date.now() - s.spawnTime) / 500; // 0.5s duration
+            if (age < 1.0) {
+                // Elastic ease out
+                const c4 = (2 * Math.PI) / 3;
+                scale = age === 0 ? 0 : age === 1 ? 1 : Math.pow(2, -10 * age) * Math.sin((age * 10 - 0.75) * c4) + 1;
+            }
+        }
+
+        const visualRadius = (s.radius + wobble) * scale;
+
         // Glow
         this.ctx.shadowBlur = 30;
         this.ctx.shadowColor = col.hex;
 
         // Main body
-        const grad = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.radius);
+        const grad = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, visualRadius);
         grad.addColorStop(0, '#fff');
         grad.addColorStop(0.3, col.hex);
         grad.addColorStop(1, 'transparent');
 
         this.ctx.fillStyle = grad;
         this.ctx.beginPath();
-        this.ctx.arc(s.x, s.y, s.radius, 0, Math.PI*2);
+        this.ctx.arc(s.x, s.y, visualRadius, 0, Math.PI*2);
         this.ctx.fill();
 
         // Core
         this.ctx.beginPath();
-        this.ctx.arc(s.x, s.y, s.radius * 0.4, 0, Math.PI*2);
+        this.ctx.arc(s.x, s.y, visualRadius * 0.4, 0, Math.PI*2);
         this.ctx.fillStyle = '#fff';
         this.ctx.fill();
 
         this.ctx.shadowBlur = 0;
+    }
+
+    drawShockwave(sw) {
+        this.ctx.save();
+        this.ctx.globalAlpha = Math.max(0, sw.life);
+        this.ctx.lineWidth = sw.width;
+        this.ctx.strokeStyle = sw.color;
+        this.ctx.beginPath();
+        this.ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.restore();
     }
 
     drawParticle(p) {
@@ -138,23 +200,37 @@ export class Renderer {
         this.ctx.globalAlpha = 1.0;
     }
 
-    drawComplexCrystal(c) {
+    drawComplexCrystal(c, colorOverride = null) {
         const xCenter = (c.lane * this.laneWidth) + (this.laneWidth / 2);
         const width = this.laneWidth * 0.8;
         const col = COLORS[c.colorIdx];
         const seed = c.shapeSeed;
 
+        let fillColor = col.hex;
+        let strokeColor = 'rgba(255,255,255,0.8)';
+
+        if (colorOverride === 'red') {
+            fillColor = 'rgba(255, 0, 0, 0.7)';
+            strokeColor = 'rgba(255, 0, 0, 0.7)';
+        } else if (colorOverride === 'blue') {
+            fillColor = 'rgba(0, 255, 255, 0.7)';
+            strokeColor = 'rgba(0, 255, 255, 0.7)';
+        }
+
         // Enhanced glow effect
-        if (c.flash > 0) {
+        if (c.flash > 0 && !colorOverride) {
             this.ctx.shadowBlur = 50 * c.flash;
             this.ctx.shadowColor = 'white';
             this.ctx.fillStyle = '#fff';
             this.ctx.strokeStyle = '#fff';
-        } else {
+        } else if (!colorOverride) {
             this.ctx.shadowBlur = 35;
             this.ctx.shadowColor = col.glow;
-            this.ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            this.ctx.strokeStyle = strokeColor;
+        } else {
+             this.ctx.strokeStyle = strokeColor;
         }
+
         const baseLineWidth = 2;
         this.ctx.lineWidth = baseLineWidth;
         this.ctx.lineJoin = 'miter';
@@ -167,20 +243,24 @@ export class Renderer {
             const tipY = (c.type === 'top') ? h : this.height - h;
             const cx = xCenter + offsetX;
 
-            // Enhanced gradient with more depth
-            const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
-            if (c.flash > 0) {
-                 grad.addColorStop(0, '#fff');
-                 grad.addColorStop(0.5, '#fff');
-                 grad.addColorStop(1, '#fff');
+            if (!colorOverride) {
+                // Enhanced gradient with more depth
+                const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
+                if (c.flash > 0) {
+                     grad.addColorStop(0, '#fff');
+                     grad.addColorStop(0.5, '#fff');
+                     grad.addColorStop(1, '#fff');
+                } else {
+                     // More vibrant color gradient
+                     grad.addColorStop(0, col.hex);
+                     grad.addColorStop(0.4, col.hex);
+                     grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
+                     grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+                }
+                this.ctx.fillStyle = grad;
             } else {
-                 // More vibrant color gradient
-                 grad.addColorStop(0, col.hex);
-                 grad.addColorStop(0.4, col.hex);
-                 grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
-                 grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+                this.ctx.fillStyle = fillColor;
             }
-            this.ctx.fillStyle = grad;
 
             // Draw main crystal shape with more facets
             this.ctx.beginPath();
@@ -240,7 +320,7 @@ export class Renderer {
             this.ctx.stroke();
 
             // Enhanced internal facets with multiple layers
-            if (c.flash < 0.5) {
+            if (!colorOverride && c.flash < 0.5) {
                 // Primary highlight facet
                 this.ctx.fillStyle = 'rgba(255,255,255,0.3)';
                 this.ctx.beginPath();
