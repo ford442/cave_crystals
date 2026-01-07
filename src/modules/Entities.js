@@ -54,13 +54,13 @@ export class Spore {
                 // Create particles at impact point
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true);
+                scoreCallback(10, true, this.x, topCry.height); // Added coordinates for floating text
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
                 topCry.height = wasmManager.calculatePenaltyHeight(topCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, topCry.height, '#555', 10);
-                scoreCallback(0, false);
+                scoreCallback(0, false, this.x, topCry.height); // Added coordinates
             }
         }
 
@@ -73,13 +73,13 @@ export class Spore {
                 // Create particles at impact point
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true);
+                scoreCallback(10, true, this.x, height - botCry.height); // Added coordinates
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
                 botCry.height = wasmManager.calculatePenaltyHeight(botCry.height, GAME_CONFIG.penaltyGrowth);
                 createParticlesCallback(this.x, height - botCry.height, '#555', 10);
-                scoreCallback(0, false);
+                scoreCallback(0, false, this.x, height - botCry.height); // Added coordinates
             }
         }
 
@@ -160,5 +160,31 @@ export class Shockwave {
         this.radius += 10; // Expand fast
         this.life -= 0.05; // Fade out
         this.width = Math.max(0, this.width - 0.5);
+    }
+}
+
+export class FloatingText {
+    constructor(x, y, text, color) {
+        this.x = x;
+        this.y = y;
+        this.text = text;
+        this.color = color;
+        this.life = 1.0;
+        this.vy = -2; // Move upwards
+        this.scale = 0.5;
+        this.targetScale = 1.5;
+    }
+
+    update() {
+        this.y += this.vy;
+        this.life -= 0.02;
+
+        // Pop in effect
+        if (this.scale < this.targetScale) {
+            this.scale += (this.targetScale - this.scale) * 0.2;
+        }
+
+        // Slow down upward movement
+        this.vy *= 0.95;
     }
 }

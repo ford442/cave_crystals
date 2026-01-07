@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, Shockwave } from './Entities.js';
+import { Crystal, Spore, Particle, Shockwave, FloatingText } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -31,6 +31,7 @@ export class Game {
             spores: [],
             particles: [],
             shockwaves: [],
+            floatingTexts: [],
             nextSporeColorIdx: 0,
             mouseLane: 3,
             growthMultiplier: 1,
@@ -74,6 +75,7 @@ export class Game {
         this.state.spores = [];
         this.state.particles = [];
         this.state.shockwaves = [];
+        this.state.floatingTexts = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
@@ -143,6 +145,10 @@ export class Game {
         this.state.shockwaves.push(new Shockwave(x, y, color));
     }
 
+    createFloatingText(x, y, text, color) {
+        this.state.floatingTexts.push(new FloatingText(x, y, text, color));
+    }
+
     update(dt) {
         // Shake decay
         if (this.state.shake > 0) {
@@ -188,15 +194,24 @@ export class Game {
         // Update Spores
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
-            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch) => {
+            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y) => {
                 this.state.score += points;
                 if (isMatch) {
                     this.state.shake = 10;
                     this.state.impactFlash = 0.5; // Flash screen on match
+                    if (x !== undefined && y !== undefined) {
+                        this.createFloatingText(x, y, `+${points}`, '#fff');
+                    }
                 } else if (points === 0) {
                     // Mismatch
                     this.state.shake = 20;
                     this.state.impactFlash = 0.2; // Small flash on error
+                    if (x !== undefined && y !== undefined) {
+                        // "MISS" text? Or just sound. Maybe a red "!" or "X"
+                        // Or just "0"
+                        // Let's do nothing for now as 0 is boring, but if we want feedback:
+                        this.createFloatingText(x, y, "MISS", '#f00');
+                    }
                 }
             }, this.createShockwave.bind(this));
             if (!s.active) {
@@ -217,6 +232,13 @@ export class Game {
             let sw = this.state.shockwaves[i];
             sw.update();
             if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
+        }
+
+        // Update Floating Texts
+        for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
+            let ft = this.state.floatingTexts[i];
+            ft.update();
+            if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
     }
 

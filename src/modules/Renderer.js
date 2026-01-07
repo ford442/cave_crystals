@@ -66,6 +66,10 @@ export class Renderer {
             gameState.shockwaves.forEach(sw => this.drawShockwave(sw));
         }
 
+        if (gameState.floatingTexts) {
+            gameState.floatingTexts.forEach(ft => this.drawFloatingText(ft));
+        }
+
         this.ctx.restore();
 
         // Draw Impact Flash (independent of shake translation)
@@ -198,6 +202,30 @@ export class Renderer {
 
         this.ctx.shadowBlur = 0;
         this.ctx.globalAlpha = 1.0;
+    }
+
+    drawFloatingText(ft) {
+        this.ctx.save();
+        this.ctx.translate(ft.x, ft.y);
+        this.ctx.scale(ft.scale, ft.scale);
+
+        // Outline
+        this.ctx.strokeStyle = '#000';
+        this.ctx.lineWidth = 3;
+        this.ctx.lineJoin = 'round';
+        this.ctx.globalAlpha = ft.life;
+
+        // Text style
+        this.ctx.font = 'bold 24px Arial, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+
+        // Draw stroke and fill
+        this.ctx.strokeText(ft.text, 0, 0);
+        this.ctx.fillStyle = ft.color;
+        this.ctx.fillText(ft.text, 0, 0);
+
+        this.ctx.restore();
     }
 
     drawComplexCrystal(c, colorOverride = null) {
