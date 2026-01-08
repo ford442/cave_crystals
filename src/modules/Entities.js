@@ -188,3 +188,66 @@ export class FloatingText {
         this.vy *= 0.95;
     }
 }
+
+export class Launcher {
+    constructor(laneWidth, height) {
+        this.laneWidth = laneWidth;
+        this.rendererHeight = height;
+
+        // Logical state
+        this.targetLane = 3; // Start at middle
+
+        // Visual state
+        this.x = (this.targetLane * laneWidth) + (laneWidth / 2);
+        this.y = height / 2;
+        this.tilt = 0;
+        this.recoil = 0;
+        this.scaleX = 1.0;
+        this.scaleY = 1.0;
+
+        // Constants
+        this.lerpFactor = 0.2;
+        this.tiltFactor = 0.5;
+        this.recoilRecovery = 0.1;
+        this.squashRecovery = 0.1;
+    }
+
+    setTargetLane(lane) {
+        this.targetLane = lane;
+    }
+
+    fire() {
+        this.recoil = 15; // Kick back
+        this.scaleX = 1.3; // Stretch horizontal
+        this.scaleY = 0.7; // Squash vertical
+    }
+
+    update() {
+        // Lerp position
+        const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
+        const dx = targetX - this.x;
+
+        this.x += dx * this.lerpFactor;
+
+        // Calculate tilt based on movement velocity (dx)
+        // If moving right, tilt left (negative rotation) and vice versa?
+        // Or "bank" into the turn?
+        // Let's bank into movement: moving right -> tilt right (positive)
+        // Actually, usually you tilt forward into the direction.
+        // Let's try: dx > 0 (moving right) -> tilt right.
+        const targetTilt = dx * 0.05;
+
+        // Smoothly interpolate tilt
+        this.tilt += (targetTilt - this.tilt) * 0.2;
+
+        // Recover recoil
+        if (this.recoil > 0) {
+            this.recoil -= (this.recoil * 0.2) + 0.1;
+            if (this.recoil < 0) this.recoil = 0;
+        }
+
+        // Recover squash/stretch
+        this.scaleX += (1.0 - this.scaleX) * this.squashRecovery;
+        this.scaleY += (1.0 - this.scaleY) * this.squashRecovery;
+    }
+}
