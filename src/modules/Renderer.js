@@ -21,7 +21,7 @@ export class Renderer {
         this.ctx.clearRect(0, 0, this.width, this.height);
     }
 
-    draw(gameState) {
+    draw(gameState, launcher) {
         if (!this.ctx) return;
         this.clear();
 
@@ -58,7 +58,7 @@ export class Renderer {
              this.drawComplexCrystal(c);
         });
 
-        this.drawCursor(gameState);
+        this.drawCursor(gameState, launcher);
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => this.drawParticle(p));
 
@@ -98,22 +98,83 @@ export class Renderer {
         }
     }
 
-    drawCursor(gameState) {
-        if(!gameState.active) return;
-        const laneX = (gameState.mouseLane * this.laneWidth) + (this.laneWidth / 2);
+    drawCursor(gameState, launcher) {
+        if(!gameState.active || !launcher) return;
+
+        // Draw Guide Line for Target Lane (where mouse is)
+        // We use the launcher.targetLane for the guide to show where you are aiming
+        const targetLaneX = (launcher.targetLane * this.laneWidth) + (this.laneWidth / 2);
 
         this.ctx.beginPath();
         this.ctx.setLineDash([5, 15]);
-        this.ctx.moveTo(laneX, 0);
-        this.ctx.lineTo(laneX, this.height);
+        this.ctx.moveTo(targetLaneX, 0);
+        this.ctx.lineTo(targetLaneX, this.height);
         this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
         this.ctx.stroke();
         this.ctx.setLineDash([]);
 
-        this.ctx.beginPath();
-        this.ctx.arc(laneX, this.height/2, 8, 0, Math.PI*2);
+        // Draw Actual Launcher Entity (Visual Position)
+        this.ctx.save();
+        this.ctx.translate(launcher.x, launcher.y);
+        this.ctx.rotate(launcher.tilt);
+        this.ctx.scale(launcher.scaleX, launcher.scaleY);
+
+        // Apply recoil offset (kick back is usually down or up depending on perspective,
+        // here let's say "back" means away from center, but since it's 2D side/top hybrid?
+        // Let's assume recoil pushes it "down" the screen slightly if shooting up?
+        // Actually, shooting spores might be "in" or "up".
+        // Let's just translate Y by recoil.
+        // Assuming shooting "forward" (away from player?) No, game is lanes.
+        // Spore moves from launcher.y (middle?) out?
+        // Wait, Game.js says: y = this.renderer.height / 2;
+        // Crystals are at top and bottom.
+        // So launcher is in the middle firing... both ways?
+        // Spore update checks top and bottom.
+        // Ah, the spore moves? Spore.radius expands.
+        // Spore.update checks collisions.
+        // Actually, Spore doesn't seem to move X/Y in update, it just expands radius?
+        // "this.radius += GAME_CONFIG.sporeExpandRate;"
+        // So the spore stays at (x,y) and grows until it hits top/bottom crystals.
+        // So the launcher is in the center.
+
+        // Recoil should probably just be a scale punch or a small shake.
+        // But I added 'recoil' as a value. Let's map it to a slight Y offset
+        // or maybe random jitter.
+        // Let's translate Y by recoil * direction?
+        // Let's just offset Y by recoil.
+        this.ctx.translate(0, launcher.recoil);
+
+        // Draw Juicy Launcher Shape (Triangle/Arrow)
         this.ctx.fillStyle = '#fff';
+        this.ctx.shadowBlur = 15;
+        this.ctx.shadowColor = '#0ff';
+
+        this.ctx.beginPath();
+        // Central hub
+        this.ctx.arc(0, 0, 10, 0, Math.PI*2);
         this.ctx.fill();
+
+        // Wings/Pointers
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, -15);
+        this.ctx.lineTo(8, 5);
+        this.ctx.lineTo(0, 0);
+        this.ctx.lineTo(-8, 5);
+        this.ctx.closePath();
+        this.ctx.fillStyle = '#0ff';
+        this.ctx.fill();
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 15);
+        this.ctx.lineTo(8, -5);
+        this.ctx.lineTo(0, 0);
+        this.ctx.lineTo(-8, -5);
+        this.ctx.closePath();
+        this.ctx.fillStyle = '#0ff';
+        this.ctx.fill();
+
+        this.ctx.shadowBlur = 0;
+        this.ctx.restore();
     }
 
     drawSpore(s) {

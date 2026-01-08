@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, Shockwave, FloatingText } from './Entities.js';
+import { Crystal, Spore, Particle, Shockwave, FloatingText, Launcher } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -10,6 +10,7 @@ export class Game {
         this.background = new Background();
         this.canvas = document.getElementById('gameCanvas');
         this.renderer = new Renderer(this.canvas);
+        this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
 
         this.ui = {
             start: document.getElementById('startScreen'),
@@ -33,7 +34,6 @@ export class Game {
             shockwaves: [],
             floatingTexts: [],
             nextSporeColorIdx: 0,
-            mouseLane: 3,
             growthMultiplier: 1,
             shake: 0,
             displayScore: 0,
@@ -63,6 +63,9 @@ export class Game {
 
     resize() {
         this.renderer.resize(window.innerWidth, window.innerHeight);
+        this.launcher.laneWidth = this.renderer.laneWidth;
+        this.launcher.rendererHeight = this.renderer.height;
+        this.launcher.y = this.renderer.height / 2;
     }
 
     startGame() {
@@ -100,7 +103,8 @@ export class Game {
     handleMouseMove(e) {
         if (!this.state.active) return;
         const lane = Math.floor(e.clientX / this.renderer.laneWidth);
-        this.state.mouseLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
+        const targetLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
+        this.launcher.setTargetLane(targetLane);
     }
 
     handleInput(e) {
@@ -112,19 +116,28 @@ export class Game {
         if (!this.state.active) return;
         const touchX = e.touches[0].clientX;
         const lane = Math.floor(touchX / this.renderer.laneWidth);
-        this.state.mouseLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
+        const targetLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
+        this.launcher.setTargetLane(targetLane);
         this.shootSpore();
     }
 
     shootSpore() {
         SoundManager.shoot();
+        this.launcher.fire();
 
         const colorIdx = this.state.nextSporeColorIdx;
 
-        const x = (this.state.mouseLane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
-        const y = this.renderer.height / 2;
+        // Use launcher's current logical lane for the spore
+        const lane = this.launcher.targetLane;
 
-        this.state.spores.push(new Spore(x, y, this.state.mouseLane, colorIdx));
+        // Spawn spore at launcher's current visual position (juicy!)
+        const x = this.launcher.x;
+        const y = this.launcher.y;
+
+        // Visual fluff: Muzzle flash particles
+        this.createParticles(x, y, '#fff', 10);
+
+        this.state.spores.push(new Spore(x, y, lane, colorIdx));
 
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.updateUI();
@@ -240,6 +253,8 @@ export class Game {
             ft.update();
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
+
+        this.launcher.update();
     }
 
     updateUI() {
@@ -262,7 +277,7 @@ export class Game {
         if (this.state.active) {
             this.update(dt);
         }
-        this.renderer.draw(this.state);
+        this.renderer.draw(this.state, this.launcher);
 
         this.state.lastTime = timestamp;
         requestAnimationFrame(this.loop.bind(this));
