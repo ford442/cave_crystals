@@ -10,11 +10,32 @@ export class Crystal {
         this.colorIdx = colorIdx;
         this.flash = 0;
         this.shapeSeed = Math.random();
+
+        // Elastic Juice properties
+        this.scaleX = 1.0;
+        this.scaleY = 1.0;
+        this.velScaleX = 0;
+        this.velScaleY = 0;
     }
 
     update(growthRate) {
         this.height += growthRate;
         if(this.flash > 0) this.flash -= 0.1;
+
+        // Spring physics for scale
+        // Target is 1.0
+        const k = 0.2; // Spring constant
+        const d = 0.85; // Damping
+
+        const fx = (1.0 - this.scaleX) * k;
+        this.velScaleX += fx;
+        this.velScaleX *= d;
+        this.scaleX += this.velScaleX;
+
+        const fy = (1.0 - this.scaleY) * k;
+        this.velScaleY += fy;
+        this.velScaleY *= d;
+        this.scaleY += this.velScaleY;
     }
 }
 
@@ -51,6 +72,10 @@ export class Spore {
                 SoundManager.match();
                 topCry.height = wasmManager.calculateMatchHeight(topCry.height, GAME_CONFIG.matchShrink, 10);
                 topCry.flash = 1;
+                // JUICE: Squash on impact
+                topCry.velScaleY -= 0.3; // Compress vertical
+                topCry.velScaleX += 0.2; // Expand horizontal
+
                 // Create particles at impact point
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
@@ -59,6 +84,11 @@ export class Spore {
             } else {
                 SoundManager.mismatch();
                 topCry.height = wasmManager.calculatePenaltyHeight(topCry.height, GAME_CONFIG.penaltyGrowth);
+
+                // JUICE: Wobble on mismatch
+                topCry.velScaleY += 0.1;
+                topCry.velScaleX -= 0.1;
+
                 createParticlesCallback(this.x, topCry.height, '#555', 10);
                 scoreCallback(0, false, this.x, topCry.height); // Added coordinates
             }
@@ -70,6 +100,10 @@ export class Spore {
                 SoundManager.match();
                 botCry.height = wasmManager.calculateMatchHeight(botCry.height, GAME_CONFIG.matchShrink, 10);
                 botCry.flash = 1;
+                // JUICE: Squash on impact
+                botCry.velScaleY -= 0.3;
+                botCry.velScaleX += 0.2;
+
                 // Create particles at impact point
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
@@ -78,6 +112,11 @@ export class Spore {
             } else {
                 SoundManager.mismatch();
                 botCry.height = wasmManager.calculatePenaltyHeight(botCry.height, GAME_CONFIG.penaltyGrowth);
+
+                // JUICE: Wobble on mismatch
+                botCry.velScaleY += 0.1;
+                botCry.velScaleX -= 0.1;
+
                 createParticlesCallback(this.x, height - botCry.height, '#555', 10);
                 scoreCallback(0, false, this.x, height - botCry.height); // Added coordinates
             }

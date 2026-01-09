@@ -291,7 +291,11 @@ export class Renderer {
 
     drawComplexCrystal(c, colorOverride = null) {
         const xCenter = (c.lane * this.laneWidth) + (this.laneWidth / 2);
-        const width = this.laneWidth * 0.8;
+
+        // Apply elastic scale (Juice!)
+        const width = this.laneWidth * 0.8 * (c.scaleX || 1.0);
+        const heightScale = c.scaleY || 1.0;
+
         const col = COLORS[c.colorIdx];
         const seed = c.shapeSeed;
 
@@ -325,7 +329,8 @@ export class Renderer {
         this.ctx.lineJoin = 'miter';
 
         const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
-            const h = c.height * hScale;
+            // Apply height scale to the crystal height
+            const h = c.height * hScale * heightScale;
             const w = width * wScale;
             const halfW = w / 2;
             const baseY = (c.type === 'top') ? 0 : this.height;

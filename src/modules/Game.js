@@ -37,7 +37,8 @@ export class Game {
             growthMultiplier: 1,
             shake: 0,
             displayScore: 0,
-            impactFlash: 0
+            impactFlash: 0,
+            sleepTimer: 0 // For hit stop / impact freeze
         };
 
         // Initialize WASM asynchronously
@@ -210,15 +211,17 @@ export class Game {
             s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y) => {
                 this.state.score += points;
                 if (isMatch) {
-                    this.state.shake = 10;
-                    this.state.impactFlash = 0.5; // Flash screen on match
+                    this.state.shake = 15; // Increased shake
+                    this.state.impactFlash = 0.6; // stronger flash
+                    this.state.sleepTimer = 50; // 50ms Hit Stop
                     if (x !== undefined && y !== undefined) {
                         this.createFloatingText(x, y, `+${points}`, '#fff');
                     }
                 } else if (points === 0) {
                     // Mismatch
-                    this.state.shake = 20;
-                    this.state.impactFlash = 0.2; // Small flash on error
+                    this.state.shake = 25;
+                    this.state.impactFlash = 0.3; // Small flash on error
+                    this.state.sleepTimer = 30; // Small hit stop for errors too
                     if (x !== undefined && y !== undefined) {
                         // "MISS" text? Or just sound. Maybe a red "!" or "X"
                         // Or just "0"
@@ -272,14 +275,26 @@ export class Game {
 
     loop(timestamp) {
         if (!this.state.lastTime) this.state.lastTime = timestamp;
-        const dt = timestamp - this.state.lastTime;
+        let dt = timestamp - this.state.lastTime;
+        this.state.lastTime = timestamp;
+
+        // Cap dt to prevent huge jumps if tab was inactive
+        if (dt > 100) dt = 100;
+
+        // Impact Sleep (Hit Stop)
+        if (this.state.sleepTimer > 0) {
+            this.state.sleepTimer -= dt;
+            // Still draw (frozen frame), maybe with continued shake
+            this.renderer.draw(this.state, this.launcher);
+            requestAnimationFrame(this.loop.bind(this));
+            return;
+        }
 
         if (this.state.active) {
             this.update(dt);
         }
         this.renderer.draw(this.state, this.launcher);
 
-        this.state.lastTime = timestamp;
         requestAnimationFrame(this.loop.bind(this));
     }
 }
