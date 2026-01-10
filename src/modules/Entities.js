@@ -243,6 +243,7 @@ export class Launcher {
         this.recoil = 0;
         this.scaleX = 1.0;
         this.scaleY = 1.0;
+        this.speed = 0;
 
         // Constants
         this.lerpFactor = 0.2;
@@ -266,7 +267,9 @@ export class Launcher {
         const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
         const dx = targetX - this.x;
 
-        this.x += dx * this.lerpFactor;
+        const moveStep = dx * this.lerpFactor;
+        this.x += moveStep;
+        this.speed = Math.abs(moveStep);
 
         // Calculate tilt based on movement velocity (dx)
         // If moving right, tilt left (negative rotation) and vice versa?

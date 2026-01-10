@@ -27,7 +27,12 @@ export class Renderer {
 
         this.ctx.save();
 
-        const isShaking = gameState.shake > 2;
+        // Calculate Chromatic Aberration Magnitude based on Shake AND Player Velocity
+        // "Warp Drive" Effect: Moving fast distorts reality
+        const launcherSpeed = launcher ? launcher.speed : 0;
+        const warpMagnitude = gameState.shake + (launcherSpeed * 1.0);
+
+        const isWarping = warpMagnitude > 2;
 
         if (gameState.shake > 0) {
             const dx = (Math.random() - 0.5) * gameState.shake;
@@ -37,19 +42,19 @@ export class Renderer {
 
         this.drawGuides();
 
-        // Draw Crystals with Chromatic Aberration if shaking
+        // Draw Crystals with Chromatic Aberration
         gameState.crystals.forEach(c => {
-             if (isShaking) {
+             if (isWarping) {
                  this.ctx.globalCompositeOperation = 'screen';
                  // Red Channel Offset
                  this.ctx.save();
-                 this.ctx.translate(-3, 0);
+                 this.ctx.translate(-3 - (warpMagnitude * 0.1), 0);
                  this.drawComplexCrystal(c, 'red');
                  this.ctx.restore();
 
                  // Blue Channel Offset
                  this.ctx.save();
-                 this.ctx.translate(3, 0);
+                 this.ctx.translate(3 + (warpMagnitude * 0.1), 0);
                  this.drawComplexCrystal(c, 'blue');
                  this.ctx.restore();
 
@@ -58,7 +63,26 @@ export class Renderer {
              this.drawComplexCrystal(c);
         });
 
-        this.drawCursor(gameState, launcher);
+        // Draw Launcher with Chromatic Aberration (Motion Blur)
+        if (launcher) {
+            if (isWarping) {
+                this.ctx.globalCompositeOperation = 'screen';
+                // Red Channel
+                this.ctx.save();
+                this.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
+                this.drawCursor(gameState, launcher, 'red');
+                this.ctx.restore();
+
+                // Blue Channel
+                this.ctx.save();
+                this.ctx.translate(4 + (warpMagnitude * 0.2), 0);
+                this.drawCursor(gameState, launcher, 'blue');
+                this.ctx.restore();
+
+                this.ctx.globalCompositeOperation = 'source-over';
+            }
+            this.drawCursor(gameState, launcher);
+        }
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => this.drawParticle(p));
 
@@ -98,20 +122,20 @@ export class Renderer {
         }
     }
 
-    drawCursor(gameState, launcher) {
+    drawCursor(gameState, launcher, colorOverride = null) {
         if(!gameState.active || !launcher) return;
 
-        // Draw Guide Line for Target Lane (where mouse is)
-        // We use the launcher.targetLane for the guide to show where you are aiming
-        const targetLaneX = (launcher.targetLane * this.laneWidth) + (this.laneWidth / 2);
-
-        this.ctx.beginPath();
-        this.ctx.setLineDash([5, 15]);
-        this.ctx.moveTo(targetLaneX, 0);
-        this.ctx.lineTo(targetLaneX, this.height);
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
+        // Draw Guide Line (only on main pass)
+        if (!colorOverride) {
+            const targetLaneX = (launcher.targetLane * this.laneWidth) + (this.laneWidth / 2);
+            this.ctx.beginPath();
+            this.ctx.setLineDash([5, 15]);
+            this.ctx.moveTo(targetLaneX, 0);
+            this.ctx.lineTo(targetLaneX, this.height);
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
+        }
 
         // Draw Actual Launcher Entity (Visual Position)
         this.ctx.save();
@@ -119,35 +143,30 @@ export class Renderer {
         this.ctx.rotate(launcher.tilt);
         this.ctx.scale(launcher.scaleX, launcher.scaleY);
 
-        // Apply recoil offset (kick back is usually down or up depending on perspective,
-        // here let's say "back" means away from center, but since it's 2D side/top hybrid?
-        // Let's assume recoil pushes it "down" the screen slightly if shooting up?
-        // Actually, shooting spores might be "in" or "up".
-        // Let's just translate Y by recoil.
-        // Assuming shooting "forward" (away from player?) No, game is lanes.
-        // Spore moves from launcher.y (middle?) out?
-        // Wait, Game.js says: y = this.renderer.height / 2;
-        // Crystals are at top and bottom.
-        // So launcher is in the middle firing... both ways?
-        // Spore update checks top and bottom.
-        // Ah, the spore moves? Spore.radius expands.
-        // Spore.update checks collisions.
-        // Actually, Spore doesn't seem to move X/Y in update, it just expands radius?
-        // "this.radius += GAME_CONFIG.sporeExpandRate;"
-        // So the spore stays at (x,y) and grows until it hits top/bottom crystals.
-        // So the launcher is in the center.
-
-        // Recoil should probably just be a scale punch or a small shake.
-        // But I added 'recoil' as a value. Let's map it to a slight Y offset
-        // or maybe random jitter.
-        // Let's translate Y by recoil * direction?
-        // Let's just offset Y by recoil.
         this.ctx.translate(0, launcher.recoil);
 
+        // Setup Colors
+        let mainColor = '#fff';
+        let wingColor = '#0ff';
+        let glowColor = '#0ff';
+        let shadowBlur = 15;
+
+        if (colorOverride === 'red') {
+            mainColor = 'rgba(255, 0, 0, 0.7)';
+            wingColor = 'rgba(255, 0, 0, 0.7)';
+            glowColor = 'red';
+            shadowBlur = 10;
+        } else if (colorOverride === 'blue') {
+            mainColor = 'rgba(0, 255, 255, 0.7)';
+            wingColor = 'rgba(0, 255, 255, 0.7)';
+            glowColor = 'cyan';
+            shadowBlur = 10;
+        }
+
         // Draw Juicy Launcher Shape (Triangle/Arrow)
-        this.ctx.fillStyle = '#fff';
-        this.ctx.shadowBlur = 15;
-        this.ctx.shadowColor = '#0ff';
+        this.ctx.fillStyle = mainColor;
+        this.ctx.shadowBlur = shadowBlur;
+        this.ctx.shadowColor = glowColor;
 
         this.ctx.beginPath();
         // Central hub
@@ -161,7 +180,7 @@ export class Renderer {
         this.ctx.lineTo(0, 0);
         this.ctx.lineTo(-8, 5);
         this.ctx.closePath();
-        this.ctx.fillStyle = '#0ff';
+        this.ctx.fillStyle = wingColor;
         this.ctx.fill();
 
         this.ctx.beginPath();
@@ -170,7 +189,7 @@ export class Renderer {
         this.ctx.lineTo(0, 0);
         this.ctx.lineTo(-8, -5);
         this.ctx.closePath();
-        this.ctx.fillStyle = '#0ff';
+        this.ctx.fillStyle = wingColor;
         this.ctx.fill();
 
         this.ctx.shadowBlur = 0;
