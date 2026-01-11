@@ -84,7 +84,13 @@ export class Renderer {
             this.drawCursor(gameState, launcher);
         }
         gameState.spores.forEach(s => this.drawSpore(s));
-        gameState.particles.forEach(p => this.drawParticle(p));
+        gameState.particles.forEach(p => {
+             if (p.constructor.name === 'TrailParticle') {
+                 this.drawTrailParticle(p);
+             } else {
+                 this.drawParticle(p);
+             }
+        });
 
         if (gameState.shockwaves) {
             gameState.shockwaves.forEach(sw => this.drawShockwave(sw));
@@ -281,6 +287,15 @@ export class Renderer {
         this.ctx.restore();
 
         this.ctx.shadowBlur = 0;
+        this.ctx.globalAlpha = 1.0;
+    }
+
+    drawTrailParticle(p) {
+        this.ctx.globalAlpha = p.life;
+        this.ctx.fillStyle = p.color;
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        this.ctx.fill();
         this.ctx.globalAlpha = 1.0;
     }
 

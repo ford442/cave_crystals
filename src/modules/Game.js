@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, Shockwave, FloatingText, Launcher } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -155,6 +155,10 @@ export class Game {
         }
     }
 
+    createTrailParticle(x, y, color) {
+        this.state.particles.push(new TrailParticle(x, y, color));
+    }
+
     createShockwave(x, y, color) {
         this.state.shockwaves.push(new Shockwave(x, y, color));
     }
@@ -229,7 +233,7 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this));
+            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this));
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();

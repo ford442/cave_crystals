@@ -51,8 +51,13 @@ export class Spore {
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback) {
+    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback) {
         if (!this.active) return;
+
+        // Visual Juice: Emit trail particles
+        if (createTrailCallback && Math.random() > 0.3) {
+             createTrailCallback(this.x, this.y, COLORS[this.colorIdx].hex);
+        }
 
         this.radius += GAME_CONFIG.sporeExpandRate;
 
@@ -181,6 +186,27 @@ export class Particle {
 
         // Decay
         this.life -= 0.015;
+    }
+}
+
+export class TrailParticle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.life = 1.0;
+        this.maxLife = 1.0;
+        this.size = Math.random() * 4 + 2;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.vx = (Math.random() - 0.5) * 0.5;
+        this.vy = (Math.random() - 0.5) * 0.5;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 0.05; // Fade fast
+        this.size *= 0.9; // Shrink
     }
 }
 
