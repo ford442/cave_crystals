@@ -84,7 +84,7 @@ export class Spore {
                 // Create particles at impact point
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true, this.x, topCry.height); // Added coordinates for floating text
+                scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
@@ -95,7 +95,7 @@ export class Spore {
                 topCry.velScaleX -= 0.1;
 
                 createParticlesCallback(this.x, topCry.height, '#555', 10);
-                scoreCallback(0, false, this.x, topCry.height); // Added coordinates
+                scoreCallback(0, false, this.x, topCry.height, '#555'); // Added coordinates
             }
         }
 
@@ -112,7 +112,7 @@ export class Spore {
                 // Create particles at impact point
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true, this.x, height - botCry.height); // Added coordinates
+                scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
             } else {
                 SoundManager.mismatch();
@@ -123,7 +123,7 @@ export class Spore {
                 botCry.velScaleX -= 0.1;
 
                 createParticlesCallback(this.x, height - botCry.height, '#555', 10);
-                scoreCallback(0, false, this.x, height - botCry.height); // Added coordinates
+                scoreCallback(0, false, this.x, height - botCry.height, '#555'); // Added coordinates
             }
         }
 
@@ -156,6 +156,13 @@ export class Particle {
         // Juice properties
         this.rotation = Math.random() * Math.PI * 2;
         this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+
+        // 3D Rotation Juice
+        this.angleX = Math.random() * Math.PI * 2;
+        this.angleY = Math.random() * Math.PI * 2;
+        this.velAngleX = (Math.random() - 0.5) * 0.2;
+        this.velAngleY = (Math.random() - 0.5) * 0.2;
+
         this.gravity = 0.4;
         this.friction = 0.98;
         this.floorBounce = true;
@@ -179,10 +186,15 @@ export class Particle {
 
             // Randomize X slightly on bounce
             this.vx += (Math.random() - 0.5) * 2;
+
+            // Spin faster on bounce
+            this.velAngleX += (Math.random() - 0.5) * 0.5;
         }
 
         // Update rotation
         this.rotation += this.rotationSpeed;
+        this.angleX += this.velAngleX;
+        this.angleY += this.velAngleY;
 
         // Decay
         this.life -= 0.015;

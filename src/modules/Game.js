@@ -38,6 +38,7 @@ export class Game {
             shake: 0,
             displayScore: 0,
             impactFlash: 0,
+            impactFlashColor: '#fff',
             sleepTimer: 0 // For hit stop / impact freeze
         };
 
@@ -212,11 +213,12 @@ export class Game {
         // Update Spores
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
-            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y) => {
+            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y, color) => {
                 this.state.score += points;
                 if (isMatch) {
                     this.state.shake = 15; // Increased shake
                     this.state.impactFlash = 0.6; // stronger flash
+                    this.state.impactFlashColor = color || '#fff'; // Use match color
                     this.state.sleepTimer = 50; // 50ms Hit Stop
                     if (x !== undefined && y !== undefined) {
                         this.createFloatingText(x, y, `+${points}`, '#fff');
@@ -225,6 +227,7 @@ export class Game {
                     // Mismatch
                     this.state.shake = 25;
                     this.state.impactFlash = 0.3; // Small flash on error
+                    this.state.impactFlashColor = '#f00'; // Red flash on miss
                     this.state.sleepTimer = 30; // Small hit stop for errors too
                     if (x !== undefined && y !== undefined) {
                         // "MISS" text? Or just sound. Maybe a red "!" or "X"

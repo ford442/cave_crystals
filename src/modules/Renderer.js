@@ -25,6 +25,15 @@ export class Renderer {
         if (!this.ctx) return;
         this.clear();
 
+        // Background Color Override based on Flash
+        if (gameState.impactFlash > 0.3) {
+             // Subtle background tinting during strong flashes
+             this.ctx.fillStyle = gameState.impactFlashColor || '#000';
+             this.ctx.globalAlpha = gameState.impactFlash * 0.2;
+             this.ctx.fillRect(0, 0, this.width, this.height);
+             this.ctx.globalAlpha = 1.0;
+        }
+
         this.ctx.save();
 
         // Calculate Chromatic Aberration Magnitude based on Shake AND Player Velocity
@@ -104,14 +113,16 @@ export class Renderer {
 
         // Draw Impact Flash (independent of shake translation)
         if (gameState.impactFlash > 0) {
-            this.drawImpactFlash(gameState.impactFlash);
+            this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
         }
     }
 
-    drawImpactFlash(intensity) {
+    drawImpactFlash(intensity, color = '#fff') {
         this.ctx.save();
         // Use 'lighter' or just alpha blend
-        this.ctx.fillStyle = `rgba(255, 255, 255, ${intensity})`;
+        this.ctx.globalCompositeOperation = 'lighter';
+        this.ctx.fillStyle = color;
+        this.ctx.globalAlpha = intensity;
         this.ctx.fillRect(0, 0, this.width, this.height);
         this.ctx.restore();
     }
@@ -269,18 +280,33 @@ export class Renderer {
 
         this.ctx.save();
         this.ctx.translate(p.x, p.y);
+
+        // 3D Rotation Simulation
+        // Rotate in 2D
         this.ctx.rotate(p.rotation);
+        // Scale to simulate 3D rotation
+        const scaleX = Math.cos(p.angleX);
+        const scaleY = Math.cos(p.angleY);
+        this.ctx.scale(scaleX, scaleY);
 
         // Draw shard shape instead of circle
         this.ctx.fillStyle = p.color;
         this.ctx.shadowBlur = 10 * alpha;
         this.ctx.shadowColor = p.color;
 
+        // Glint effect if facing camera
+        if (Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9) {
+            this.ctx.fillStyle = '#fff';
+            this.ctx.shadowBlur = 20 * alpha;
+        }
+
         this.ctx.beginPath();
         const s = p.size * alpha; // Scale down with life
+        // Make it a diamond/shard shape
         this.ctx.moveTo(0, -s);
-        this.ctx.lineTo(s * 0.8, s * 0.8);
-        this.ctx.lineTo(-s * 0.8, s * 0.8);
+        this.ctx.lineTo(s * 0.6, 0);
+        this.ctx.lineTo(0, s);
+        this.ctx.lineTo(-s * 0.6, 0);
         this.ctx.closePath();
         this.ctx.fill();
 
