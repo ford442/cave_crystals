@@ -1,5 +1,58 @@
-127.0.0.1 - - [06/Jan/2026 04:15:43] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [06/Jan/2026 04:15:43] "GET /assets/index-DrVYDQED.css HTTP/1.1" 200 -
-127.0.0.1 - - [06/Jan/2026 04:15:43] "GET /assets/index-8kECoMuh.js HTTP/1.1" 200 -
-127.0.0.1 - - [06/Jan/2026 04:15:43] "GET /assets/release-Cvypc4_Q.wasm HTTP/1.1" 200 -
-127.0.0.1 - - [06/Jan/2026 04:15:43] "GET /assets/background-asuJasgv.png HTTP/1.1" 200 -
+
+> crystal-cave-spore-hunter@1.0.0 dev
+> npm run asbuild && vite
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild
+> npm run asbuild:debug && npm run asbuild:release
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild:debug
+> asc src/assembly/index.ts --target debug
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class SporeCollision {
+   │              ~~~~~~~~~~~~~~
+   └─ in src/assembly/collision.ts(3,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+    :
+ 19 │ export class CrystalData {
+    │              ~~~~~~~~~~~
+    └─ in src/assembly/collision.ts(19,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class Particle {
+   │              ~~~~~~~~
+   └─ in src/assembly/particles.ts(3,14)
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild:release
+> asc src/assembly/index.ts --target release
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class SporeCollision {
+   │              ~~~~~~~~~~~~~~
+   └─ in src/assembly/collision.ts(3,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+    :
+ 19 │ export class CrystalData {
+    │              ~~~~~~~~~~~
+    └─ in src/assembly/collision.ts(19,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class Particle {
+   │              ~~~~~~~~
+   └─ in src/assembly/particles.ts(3,14)
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+  VITE v5.4.21  ready in 322 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
