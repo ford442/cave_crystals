@@ -164,8 +164,39 @@ export class Game {
         this.state.shockwaves.push(new Shockwave(x, y, color));
     }
 
-    createFloatingText(x, y, text, color) {
-        this.state.floatingTexts.push(new FloatingText(x, y, text, color));
+    createFloatingText(x, y, text, color, scale = 1.5) {
+        this.state.floatingTexts.push(new FloatingText(x, y, text, color, scale));
+    }
+
+    triggerLevelUp() {
+        SoundManager.levelUp();
+
+        // Massive Shake
+        this.state.shake = 30;
+
+        // Screen Flash (Gold)
+        this.state.impactFlash = 0.8;
+        this.state.impactFlashColor = '#FFD700';
+
+        // Floating Text
+        this.createFloatingText(this.renderer.width / 2, this.renderer.height / 2, "LEVEL UP!", "#FFD700", 3.0);
+
+        // Shockwave
+        this.createShockwave(this.renderer.width / 2, this.renderer.height / 2, '#FFD700');
+
+        // Particles (Confetti)
+        for (let i = 0; i < 50; i++) {
+            const x = this.renderer.width / 2;
+            const y = this.renderer.height / 2;
+            const color = COLORS[Math.floor(Math.random() * COLORS.length)].hex;
+            // Use existing particle system
+            this.state.particles.push(new Particle(x, y, color));
+        }
+
+        // Juice: All crystals jump
+        this.state.crystals.forEach(c => {
+             c.velScaleY += 0.5;
+        });
     }
 
     update(dt) {
@@ -215,6 +246,14 @@ export class Game {
             let s = this.state.spores[i];
             s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y, color) => {
                 this.state.score += points;
+
+                // Level Up Check
+                const newLevel = Math.floor(this.state.score / 500) + 1;
+                if (newLevel > this.state.level) {
+                    this.state.level = newLevel;
+                    this.triggerLevelUp();
+                }
+
                 if (isMatch) {
                     this.state.shake = 15; // Increased shake
                     this.state.impactFlash = 0.6; // stronger flash

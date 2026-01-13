@@ -241,7 +241,7 @@ export class Shockwave {
 }
 
 export class FloatingText {
-    constructor(x, y, text, color) {
+    constructor(x, y, text, color, targetScale = 1.5) {
         this.x = x;
         this.y = y;
         this.text = text;
@@ -249,7 +249,7 @@ export class FloatingText {
         this.life = 1.0;
         this.vy = -2; // Move upwards
         this.scale = 0.5;
-        this.targetScale = 1.5;
+        this.targetScale = targetScale;
     }
 
     update() {

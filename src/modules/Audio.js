@@ -90,5 +90,21 @@ export const SoundManager = {
 
         osc.start();
         osc.stop(this.ctx.currentTime + 2.0);
+    },
+
+    levelUp: function() {
+        if (!this.ctx) return;
+        // Major Chord Arpeggio: C E G C
+        const freqs = [261.63, 329.63, 392.00, 523.25];
+        freqs.forEach((freq, i) => {
+            setTimeout(() => {
+                this.playTone(freq, 'triangle', 0.8, 0.15);
+            }, i * 100);
+        });
+
+        // Final sparkly high pitch
+        setTimeout(() => {
+            this.playTone(1046.50, 'sine', 1.0, 0.1);
+        }, 400);
     }
 };
