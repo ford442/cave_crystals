@@ -25,6 +25,16 @@ export class Renderer {
         if (!this.ctx) return;
         this.clear();
 
+        // JUICE: Dynamic Lighting System
+        // 1. Darken the world so lights pop
+        this.ctx.fillStyle = 'rgba(0, 0, 10, 0.5)'; // Slight blue tint for cave atmosphere
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // 2. Render Additive Lighting Pass
+        this.ctx.save();
+        this.drawLighting(gameState, launcher);
+        this.ctx.restore();
+
         // Background Color Override based on Flash
         if (gameState.impactFlash > 0.3) {
              // Subtle background tinting during strong flashes
@@ -115,6 +125,96 @@ export class Renderer {
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
         }
+    }
+
+    drawLighting(gameState, launcher) {
+        this.ctx.globalCompositeOperation = 'lighter';
+
+        const time = Date.now() / 1000;
+
+        // Helper to draw a light blob
+        const drawLight = (x, y, color, radius, intensity = 1.0) => {
+             const grad = this.ctx.createRadialGradient(x, y, 0, x, y, radius);
+             // Parse hex to rgba for gradient
+             const rgb = this.hexToRgb(color) || {r:255, g:255, b:255};
+
+             grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${intensity})`);
+             grad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${intensity * 0.3})`);
+             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+             this.ctx.fillStyle = grad;
+             this.ctx.beginPath();
+             this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+             this.ctx.fill();
+        };
+
+        // 1. Crystal Lights
+        gameState.crystals.forEach(c => {
+             const x = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+             const h = c.height * (c.scaleY || 1.0);
+             let y;
+             if (c.type === 'top') {
+                 y = h - 20; // Near the tip
+             } else {
+                 y = this.height - h + 20;
+             }
+
+             // Calculate dynamic intensity
+             // Base pulse using the new lightPhase
+             const pulse = Math.sin((time * 3) + c.lightPhase) * 0.2 + 0.8;
+             // Flash intensity
+             const flashBonus = c.flash * 2.0;
+
+             const radius = 150 + (flashBonus * 100);
+             const intensity = (0.3 + (flashBonus * 0.5)) * pulse;
+
+             const col = COLORS[c.colorIdx].hex;
+             drawLight(x, y, col, radius, intensity);
+
+             // Wall Reflections
+             // If in first lane, reflect on left wall
+             if (c.lane === 0) {
+                 // Squeeze the light vertically against the wall
+                 this.ctx.save();
+                 this.ctx.translate(0, y);
+                 this.ctx.scale(0.3, 2.0); // Make it a vertical strip
+                 drawLight(0, 0, col, radius * 1.5, intensity * 0.5);
+                 this.ctx.restore();
+             }
+             // If in last lane, reflect on right wall
+             if (c.lane === GAME_CONFIG.lanes - 1) {
+                 this.ctx.save();
+                 this.ctx.translate(this.width, y);
+                 this.ctx.scale(0.3, 2.0);
+                 drawLight(0, 0, col, radius * 1.5, intensity * 0.5);
+                 this.ctx.restore();
+             }
+        });
+
+        // 2. Spore Lights
+        gameState.spores.forEach(s => {
+             const col = COLORS[s.colorIdx].hex;
+             // Pulsing fast
+             const radius = s.radius * 4;
+             drawLight(s.x, s.y, col, radius, 0.6);
+        });
+
+        // 3. Launcher Light
+        if (launcher) {
+            drawLight(launcher.x, launcher.y, '#00FFFF', 100 + launcher.recoil * 5, 0.4);
+        }
+
+        // 4. Particle Sparkles (Only large ones or groups to save perf)
+        // We can batch draw a faint glow for particles?
+        // Or just skip for performance as there can be many.
+        // Let's do a simple iterate for large particles only
+        gameState.particles.forEach(p => {
+             if (p.size > 4) {
+                 drawLight(p.x, p.y, p.color, p.size * 4, 0.3 * p.life);
+             }
+        });
+
+        this.ctx.globalCompositeOperation = 'source-over';
     }
 
     drawImpactFlash(intensity, color = '#fff') {
