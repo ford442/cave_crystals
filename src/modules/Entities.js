@@ -10,6 +10,7 @@ export class Crystal {
         this.colorIdx = colorIdx;
         this.flash = 0;
         this.shapeSeed = Math.random();
+        this.lightPhase = Math.random() * Math.PI * 2; // Randomize start phase for pulsing light
 
         // Elastic Juice properties
         this.scaleX = 1.0;
