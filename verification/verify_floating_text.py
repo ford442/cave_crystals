@@ -1,60 +1,51 @@
-from playwright.sync_api import sync_playwright
-import time
 import os
+import time
+from playwright.sync_api import sync_playwright
 
-def test_floating_text():
-    # Use the served URL from a previous tool call or assume localhost if running locally
-    # Since I cannot run a server in the background and keep it running easily across steps,
-    # I will rely on 'npm run dev' if I could, but I'll use the build output and open file directly if possible.
-    # However, file:// doesn't support modules well.
-    # I'll try to use a simple http server in python.
+def verify_floating_text():
+    # Get absolute path to index.html (assuming we are in verification/..)
+    # We need to serve the dist folder or just index.html if it works with modules
+    # Since this is a module based game, we might need a server, but let's try opening the file first
+    # If file:// doesn't work due to CORS/Modules, we use the already running dev server if available
+    # The previous instruction mentioned "Confirm dev server runs on port 5173"
 
-    # Start a simple HTTP server in background
-    import subprocess
-    import sys
+    url = "http://localhost:5173"
 
-    # Kill any existing server on 8080
-    os.system("fuser -k 8080/tcp || true")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
 
-    server_process = subprocess.Popen([sys.executable, "-m", "http.server", "8080", "--directory", "dist"])
-    time.sleep(2) # Wait for server to start
+        print(f"Navigating to {url}...")
+        try:
+            page.goto(url)
+        except Exception as e:
+            print(f"Error connecting to {url}: {e}")
+            print("Please ensure the dev server is running.")
+            return
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+        # Wait for game to load
+        page.wait_for_selector("#gameCanvas")
 
-            print("Navigating to game...")
-            page.goto("http://localhost:8080")
+        # Click start
+        page.click("#startBtn")
+        time.sleep(0.5)
 
-            # Wait for start button and click
-            page.wait_for_selector("#startBtn")
-            page.click("#startBtn")
+        # Inject a floating text manually via console
+        print("Injecting floating text...")
+        page.evaluate("""
+            window.game.createFloatingText(window.game.renderer.width / 2, window.game.renderer.height / 2, 'JUICY!', '#FF00FF', 3.0);
+            window.game.createFloatingText(window.game.renderer.width / 2 + 100, window.game.renderer.height / 2 - 50, '+500', '#00FF00', 2.0);
+        """)
 
-            # Wait a bit for game to start
-            time.sleep(1)
+        # Wait a few frames for it to render
+        time.sleep(0.1)
 
-            # Simulate clicks to shoot spores
-            # We want to match, but it's random. So let's just spam a few shots.
-            # Center of screen (approx lane 3)
-            cw = 800 # default width
-            ch = 600
+        # Take screenshot
+        screenshot_path = "verification/floating_text.png"
+        page.screenshot(path=screenshot_path)
+        print(f"Screenshot saved to {screenshot_path}")
 
-            # Click in the middle
-            page.mouse.click(400, 300)
-            time.sleep(0.5)
-            page.mouse.click(400, 300)
-            time.sleep(0.5)
-            page.mouse.click(400, 300)
-            time.sleep(1.0) # Wait for impact
-
-            # Take screenshot
-            screenshot_path = os.path.abspath("verification/floating_text.png")
-            page.screenshot(path=screenshot_path)
-            print(f"Screenshot saved to {screenshot_path}")
-
-    finally:
-        server_process.terminate()
+        browser.close()
 
 if __name__ == "__main__":
-    test_floating_text()
+    verify_floating_text()

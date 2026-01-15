@@ -1,0 +1,64 @@
+
+> crystal-cave-spore-hunter@1.0.0 dev
+> npm run asbuild && vite
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild
+> npm run asbuild:debug && npm run asbuild:release
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild:debug
+> asc src/assembly/index.ts --target debug
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class SporeCollision {
+   │              ~~~~~~~~~~~~~~
+   └─ in src/assembly/collision.ts(3,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+    :
+ 19 │ export class CrystalData {
+    │              ~~~~~~~~~~~
+    └─ in src/assembly/collision.ts(19,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class Particle {
+   │              ~~~~~~~~
+   └─ in src/assembly/particles.ts(3,14)
+
+
+> crystal-cave-spore-hunter@1.0.0 asbuild:release
+> asc src/assembly/index.ts --target release
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class SporeCollision {
+   │              ~~~~~~~~~~~~~~
+   └─ in src/assembly/collision.ts(3,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+    :
+ 19 │ export class CrystalData {
+    │              ~~~~~~~~~~~
+    └─ in src/assembly/collision.ts(19,14)
+
+WARNING AS235: Only variables, functions and enums become WebAssembly module exports.
+   :
+ 3 │ export class Particle {
+   │              ~~~~~~~~
+   └─ in src/assembly/particles.ts(3,14)
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+  VITE v5.4.21  ready in 330 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+4:33:35 AM [vite] page reload src/modules/Game.js
+4:33:40 AM [vite] page reload src/modules/Game.js
+4:33:45 AM [vite] page reload src/modules/Renderer.js
+4:33:51 AM [vite] page reload src/modules/Renderer.js
+4:35:20 AM [vite] page reload src/modules/Entities.js
+4:35:27 AM [vite] page reload src/modules/Game.js

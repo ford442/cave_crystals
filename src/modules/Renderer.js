@@ -49,9 +49,10 @@ export class Renderer {
         // Calculate Chromatic Aberration Magnitude based on Shake AND Player Velocity
         // "Warp Drive" Effect: Moving fast distorts reality
         const launcherSpeed = launcher ? launcher.speed : 0;
-        const warpMagnitude = gameState.shake + (launcherSpeed * 1.0);
+        // JUICE: Increased warp sensitivity to speed for more impact
+        const warpMagnitude = gameState.shake + (launcherSpeed * 2.5);
 
-        const isWarping = warpMagnitude > 2;
+        const isWarping = warpMagnitude > 1.0;
 
         if (gameState.shake > 0) {
             const dx = (Math.random() - 0.5) * gameState.shake;
@@ -366,11 +367,26 @@ export class Renderer {
     drawShockwave(sw) {
         this.ctx.save();
         this.ctx.globalAlpha = Math.max(0, sw.life);
+
+        // JUICE: Fancy Shockwave with composite effect
+        this.ctx.globalCompositeOperation = 'lighter';
         this.ctx.lineWidth = sw.width;
         this.ctx.strokeStyle = sw.color;
+
+        // Outer ring
         this.ctx.beginPath();
         this.ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
         this.ctx.stroke();
+
+        // Inner Echo ring (Juice!)
+        if (sw.life > 0.5) {
+             this.ctx.lineWidth = sw.width * 0.5;
+             this.ctx.globalAlpha = Math.max(0, sw.life * 0.5);
+             this.ctx.beginPath();
+             this.ctx.arc(sw.x, sw.y, sw.radius * 0.7, 0, Math.PI * 2);
+             this.ctx.stroke();
+        }
+
         this.ctx.restore();
     }
 
