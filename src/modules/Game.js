@@ -235,9 +235,14 @@ export class Game {
 
         if (gameOver) {
             this.state.active = false;
+            this.shatterAllCrystals();
             SoundManager.gameOver();
-            this.ui.finalScore.innerText = this.state.score;
-            this.ui.gameOver.classList.remove('hidden');
+
+            // Delay showing UI slightly to let the explosion be seen
+            setTimeout(() => {
+                this.ui.finalScore.innerText = this.state.score;
+                this.ui.gameOver.classList.remove('hidden');
+            }, 1000);
             return;
         }
 
@@ -303,7 +308,8 @@ export class Game {
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
 
-        this.launcher.update();
+        // Pass trail callback for juice
+        this.launcher.update(this.createTrailParticle.bind(this));
     }
 
     updateUI() {
@@ -338,9 +344,75 @@ export class Game {
 
         if (this.state.active) {
             this.update(dt);
+        } else {
+            // Even if game over, update visuals (particles, shockwaves)
+            this.updateVisuals(dt);
         }
         this.renderer.draw(this.state, this.launcher);
 
         requestAnimationFrame(this.loop.bind(this));
+    }
+
+    shatterAllCrystals() {
+        // JUICE: Massive explosion of all crystals
+        this.state.shake = 60; // Huge shake
+        this.state.impactFlash = 1.0; // Full white flash
+        this.state.impactFlashColor = '#fff';
+
+        this.state.crystals.forEach(c => {
+            // Calculate center of crystal for explosion origin
+            const x = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
+            const h = c.height;
+            let y;
+            if (c.type === 'top') {
+                y = h / 2;
+            } else {
+                y = this.renderer.height - (h / 2);
+            }
+
+            // Spawn many particles
+            // Use crystal color
+            const color = COLORS[c.colorIdx].hex;
+            this.createParticles(x, y, color, 30); // 30 particles per crystal
+            this.createShockwave(x, y, color);
+        });
+
+        // Remove all crystals to simulate total destruction
+        this.state.crystals = [];
+    }
+
+    updateVisuals(dt) {
+        // Shake decay
+        if (this.state.shake > 0) {
+            this.state.shake *= 0.9;
+            if (this.state.shake < 0.5) this.state.shake = 0;
+        }
+
+        // Impact Flash decay
+        if (this.state.impactFlash > 0) {
+            this.state.impactFlash -= 0.1;
+            if (this.state.impactFlash < 0) this.state.impactFlash = 0;
+        }
+
+        // Update Particles
+        for (let i = this.state.particles.length - 1; i >= 0; i--) {
+            let p = this.state.particles[i];
+            p.update(this.renderer.height);
+            if (p.life <= 0) this.state.particles.splice(i, 1);
+        }
+
+        // Update Shockwaves
+        for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
+            let sw = this.state.shockwaves[i];
+            sw.update();
+            if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
+        }
+
+        // Update Floating Texts
+        for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
+            let ft = this.state.floatingTexts[i];
+            ft.update();
+            if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
+        }
     }
 }

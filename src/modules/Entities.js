@@ -301,7 +301,7 @@ export class Launcher {
         this.scaleY = 0.7; // Squash vertical
     }
 
-    update() {
+    update(createTrailCallback) {
         // Lerp position
         const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
         const dx = targetX - this.x;
@@ -310,16 +310,20 @@ export class Launcher {
         this.x += moveStep;
         this.speed = Math.abs(moveStep);
 
+        // JUICE: Speed Trail
+        if (this.speed > 2.0 && createTrailCallback) {
+             // Spawn trail particles behind the launcher
+             // Add some randomization for a "jet wash" look
+             const offset = (Math.random() - 0.5) * 15;
+             createTrailCallback(this.x + offset, this.y + 15, 'rgba(0, 255, 255, 0.5)');
+        }
+
         // Calculate tilt based on movement velocity (dx)
-        // If moving right, tilt left (negative rotation) and vice versa?
-        // Or "bank" into the turn?
-        // Let's bank into movement: moving right -> tilt right (positive)
-        // Actually, usually you tilt forward into the direction.
-        // Let's try: dx > 0 (moving right) -> tilt right.
-        const targetTilt = dx * 0.05;
+        // Bank into the turn
+        const targetTilt = dx * 0.08; // Increased tilt sensitivity
 
         // Smoothly interpolate tilt
-        this.tilt += (targetTilt - this.tilt) * 0.2;
+        this.tilt += (targetTilt - this.tilt) * 0.15; // Slightly smoother lerp
 
         // Recover recoil
         if (this.recoil > 0) {
