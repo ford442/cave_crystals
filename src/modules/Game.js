@@ -39,7 +39,8 @@ export class Game {
             displayScore: 0,
             impactFlash: 0,
             impactFlashColor: '#fff',
-            sleepTimer: 0 // For hit stop / impact freeze
+            sleepTimer: 0, // For hit stop / impact freeze
+            shakeOffset: { x: 0, y: 0, angle: 0 }
         };
 
         // Initialize WASM asynchronously
@@ -166,6 +167,26 @@ export class Game {
 
     createFloatingText(x, y, text, color, scale = 1.5) {
         this.state.floatingTexts.push(new FloatingText(x, y, text, color, scale));
+    }
+
+    calculateShake() {
+        if (this.state.shake > 0) {
+            const dx = (Math.random() - 0.5) * this.state.shake;
+            const dy = (Math.random() - 0.5) * this.state.shake;
+            const angle = (Math.random() - 0.5) * (this.state.shake * 0.002); // Subtle rotation
+
+            this.state.shakeOffset = { x: dx, y: dy, angle: angle };
+
+            // Apply to background
+            if (this.background && this.background.image) {
+                this.background.image.style.transform = `translate(${dx}px, ${dy}px) rotate(${angle}rad) scale(1.02)`;
+            }
+        } else {
+            this.state.shakeOffset = { x: 0, y: 0, angle: 0 };
+            if (this.background && this.background.image) {
+                this.background.image.style.transform = 'translate(0, 0) rotate(0) scale(1)';
+            }
+        }
     }
 
     triggerLevelUp() {
@@ -337,6 +358,7 @@ export class Game {
         if (this.state.sleepTimer > 0) {
             this.state.sleepTimer -= dt;
             // Still draw (frozen frame), maybe with continued shake
+            this.calculateShake();
             this.renderer.draw(this.state, this.launcher);
             requestAnimationFrame(this.loop.bind(this));
             return;
@@ -348,6 +370,7 @@ export class Game {
             // Even if game over, update visuals (particles, shockwaves)
             this.updateVisuals(dt);
         }
+        this.calculateShake();
         this.renderer.draw(this.state, this.launcher);
 
         requestAnimationFrame(this.loop.bind(this));

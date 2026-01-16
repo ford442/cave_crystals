@@ -54,7 +54,18 @@ export class Renderer {
 
         const isWarping = warpMagnitude > 1.0;
 
-        if (gameState.shake > 0) {
+        // Apply centralized shake offset (calculated in Game.js for sync with background)
+        if (gameState.shakeOffset) {
+             // Rotate around center
+             const cx = this.width / 2;
+             const cy = this.height / 2;
+
+             this.ctx.translate(cx, cy);
+             this.ctx.rotate(gameState.shakeOffset.angle || 0);
+             this.ctx.translate(-cx, -cy);
+
+             this.ctx.translate(gameState.shakeOffset.x || 0, gameState.shakeOffset.y || 0);
+        } else if (gameState.shake > 0) {
             const dx = (Math.random() - 0.5) * gameState.shake;
             const dy = (Math.random() - 0.5) * gameState.shake;
             this.ctx.translate(dx, dy);
