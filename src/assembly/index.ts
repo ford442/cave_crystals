@@ -23,7 +23,9 @@ export {
     batchUpdateParticles,
     getShatterVx,
     getShatterVy,
-    getBounceVy
+    getBounceVy,
+    getSmokeVx,
+    getSmokeVy
 } from './particles';
 
 export {

@@ -246,8 +246,38 @@ export class Game {
 
         this.state.crystals.forEach(c => {
             c.update(currentGrowth);
+
+            // JUICE: Critical Mass System
+            // Reset shake
+            c.shakeX = 0;
+            c.shakeY = 0;
+            c.isCritical = false;
+
             const opposite = this.state.crystals.find(oc => oc.lane === c.lane && oc.type !== c.type);
             if (opposite) {
+                const totalHeight = c.height + opposite.height;
+                const dangerThreshold = this.renderer.height * 0.75;
+
+                if (totalHeight > dangerThreshold) {
+                    c.isCritical = true;
+                    // Stress shake!
+                    c.shakeX = (Math.random() - 0.5) * 4;
+                    c.shakeY = (Math.random() - 0.5) * 4;
+
+                    // Emit smoke particles occasionally
+                    if (Math.random() < 0.1) {
+                         const x = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + c.shakeX;
+                         const tipY = c.type === 'top' ? c.height : this.renderer.height - c.height;
+
+                         // Use WASM for smoke velocity
+                         const vx = wasmManager.getSmokeVx(Math.random());
+                         const vy = wasmManager.getSmokeVy(Math.random());
+
+                         // Dark gray smoke
+                         this.state.particles.push(new Particle(x, tipY, 'rgba(100, 100, 100, 0.5)', vx, vy));
+                    }
+                }
+
                 if (wasmManager.checkCrystalGameOver(c.height, opposite.height, this.renderer.height)) {
                     gameOver = true;
                 }

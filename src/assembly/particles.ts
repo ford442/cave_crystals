@@ -102,3 +102,17 @@ export function getShatterVy(index: i32, total: i32, force: f64): f64 {
 export function getBounceVy(vy: f64, damping: f64): f64 {
     return -vy * damping;
 }
+
+/**
+ * Calculate X velocity for smoke/steam particles (gentle drift)
+ */
+export function getSmokeVx(random: f64): f64 {
+    return (random - 0.5) * 2.0;
+}
+
+/**
+ * Calculate Y velocity for smoke/steam particles (upward float)
+ */
+export function getSmokeVy(random: f64): f64 {
+    return -(random * 2.0 + 1.0);
+}

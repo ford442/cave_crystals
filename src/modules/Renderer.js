@@ -477,7 +477,10 @@ export class Renderer {
     }
 
     drawComplexCrystal(c, colorOverride = null) {
-        const xCenter = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+        // JUICE: Apply stress shake to position
+        const shakeX = c.shakeX || 0;
+        const shakeY = c.shakeY || 0;
+        const xCenter = (c.lane * this.laneWidth) + (this.laneWidth / 2) + shakeX;
 
         // Apply elastic scale (Juice!)
         const width = this.laneWidth * 0.8 * (c.scaleX || 1.0);
@@ -497,8 +500,17 @@ export class Renderer {
             strokeColor = 'rgba(0, 255, 255, 0.7)';
         }
 
-        // Enhanced glow effect
-        if (c.flash > 0 && !colorOverride) {
+        // JUICE: Critical Danger Glow
+        if (c.isCritical && !colorOverride) {
+            const pulse = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+            this.ctx.shadowBlur = 20 + (pulse * 30);
+            this.ctx.shadowColor = 'red';
+            // Tint fill slightly red
+            strokeColor = `rgba(255, 50, 50, ${0.8 + pulse * 0.2})`;
+            // Aggressive visual override
+            fillColor = `rgba(255, ${Math.floor(pulse * 50)}, ${Math.floor(pulse * 50)}, 0.9)`;
+        } else if (c.flash > 0 && !colorOverride) {
+            // Enhanced glow effect for flash
             this.ctx.shadowBlur = 50 * c.flash;
             this.ctx.shadowColor = 'white';
             this.ctx.fillStyle = '#fff';
@@ -520,8 +532,8 @@ export class Renderer {
             const h = c.height * hScale * heightScale;
             const w = width * wScale;
             const halfW = w / 2;
-            const baseY = (c.type === 'top') ? 0 : this.height;
-            const tipY = (c.type === 'top') ? h : this.height - h;
+            const baseY = ((c.type === 'top') ? 0 : this.height) + shakeY;
+            const tipY = ((c.type === 'top') ? h : this.height - h) + shakeY;
             const cx = xCenter + offsetX;
 
             if (!colorOverride) {

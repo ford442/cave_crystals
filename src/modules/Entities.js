@@ -17,6 +17,11 @@ export class Crystal {
         this.scaleY = 1.0;
         this.velScaleX = 0;
         this.velScaleY = 0;
+
+        // Critical State Juice
+        this.isCritical = false;
+        this.shakeX = 0;
+        this.shakeY = 0;
     }
 
     update(growthRate) {
