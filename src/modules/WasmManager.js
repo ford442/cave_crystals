@@ -201,6 +201,26 @@ export class WasmManager {
         }
         return -vy * damping;
     }
+
+    /**
+     * Calculate X velocity for smoke particle
+     */
+    getSmokeVx(random) {
+        if (this.ready && this.exports.getSmokeVx) {
+            return this.exports.getSmokeVx(random);
+        }
+        return (random - 0.5) * 2.0;
+    }
+
+    /**
+     * Calculate Y velocity for smoke particle
+     */
+    getSmokeVy(random) {
+        if (this.ready && this.exports.getSmokeVy) {
+            return this.exports.getSmokeVy(random);
+        }
+        return -(random * 2.0 + 1.0);
+    }
 }
 
 // Create and export a singleton instance
