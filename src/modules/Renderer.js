@@ -54,6 +54,15 @@ export class Renderer {
 
         const isWarping = warpMagnitude > 1.0;
 
+        // JUICE: Impact Zoom
+        if (gameState.zoom && gameState.zoom > 1.0) {
+            const zx = gameState.zoomFocus ? gameState.zoomFocus.x : this.width / 2;
+            const zy = gameState.zoomFocus ? gameState.zoomFocus.y : this.height / 2;
+            this.ctx.translate(zx, zy);
+            this.ctx.scale(gameState.zoom, gameState.zoom);
+            this.ctx.translate(-zx, -zy);
+        }
+
         // Apply centralized shake offset (calculated in Game.js for sync with background)
         if (gameState.shakeOffset) {
              // Rotate around center
