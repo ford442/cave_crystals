@@ -46,9 +46,9 @@ export const SoundManager = {
         osc.stop(this.ctx.currentTime + 0.2);
     },
 
-    match: function() {
+    match: function(pitchMultiplier = 1.0) {
         if (!this.ctx) return;
-        const base = 400 + Math.random() * 200;
+        const base = (400 + Math.random() * 200) * pitchMultiplier;
         [base, base * 1.25, base * 1.5].forEach((freq, i) => {
             setTimeout(() => {
                 this.playTone(freq, 'sine', 0.6, 0.1);

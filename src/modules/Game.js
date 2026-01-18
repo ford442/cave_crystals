@@ -40,7 +40,11 @@ export class Game {
             impactFlash: 0,
             impactFlashColor: '#fff',
             sleepTimer: 0, // For hit stop / impact freeze
-            shakeOffset: { x: 0, y: 0, angle: 0 }
+            shakeOffset: { x: 0, y: 0, angle: 0 },
+            combo: 0,
+            comboTimer: 0,
+            zoom: 1.0,
+            zoomFocus: { x: 0, y: 0 }
         };
 
         // Initialize WASM asynchronously
@@ -77,6 +81,10 @@ export class Game {
         this.state.score = 0;
         this.state.level = 1;
         this.state.growthMultiplier = 1;
+        this.state.combo = 0;
+        this.state.comboTimer = 0;
+        this.state.zoom = 1.0;
+        this.state.zoomFocus = { x: this.renderer.width / 2, y: this.renderer.height / 2 };
         this.state.crystals = [];
         this.state.spores = [];
         this.state.particles = [];
@@ -233,6 +241,20 @@ export class Game {
             if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
+        // Combo Timer decay
+        if (this.state.comboTimer > 0) {
+            this.state.comboTimer -= dt;
+            if (this.state.comboTimer <= 0) {
+                this.state.combo = 0;
+            }
+        }
+
+        // Zoom decay
+        if (this.state.zoom > 1.0) {
+            this.state.zoom += (1.0 - this.state.zoom) * 0.1;
+            if (this.state.zoom < 1.001) this.state.zoom = 1.0;
+        }
+
         // Score lerp
         this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
         if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
@@ -311,23 +333,47 @@ export class Game {
                 }
 
                 if (isMatch) {
-                    this.state.shake = 15; // Increased shake
+                    // JUICE: Combo Logic
+                    this.state.combo++;
+                    this.state.comboTimer = 2000; // 2 seconds to keep combo
+
+                    // Pitch Shift
+                    const pitch = 1.0 + (Math.min(this.state.combo, 10) * 0.1);
+                    SoundManager.match(pitch);
+
+                    // Screen Shake
+                    this.state.shake = 15 + (this.state.combo * 2);
+
+                    // Impact Zoom
+                    this.state.zoom = 1.02 + (Math.min(this.state.combo, 10) * 0.01);
+                    this.state.zoomFocus = { x: x || this.renderer.width/2, y: y || this.renderer.height/2 };
+
                     this.state.impactFlash = 0.6; // stronger flash
                     this.state.impactFlashColor = color || '#fff'; // Use match color
                     this.state.sleepTimer = 50; // 50ms Hit Stop
+
                     if (x !== undefined && y !== undefined) {
                         this.createFloatingText(x, y, `+${points}`, '#fff');
+
+                        // JUICE: Combo Text
+                        if (this.state.combo > 1) {
+                            const comboColors = ['#fff', '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
+                            const colIdx = Math.min(this.state.combo - 1, comboColors.length - 1);
+                            const scale = 1.5 + (this.state.combo * 0.2);
+                            this.createFloatingText(x, y - 30, `COMBO x${this.state.combo}!`, comboColors[colIdx], scale);
+                        }
                     }
                 } else if (points === 0) {
-                    // Mismatch
+                    // Mismatch - Break Combo
+                    this.state.combo = 0;
+                    this.state.comboTimer = 0;
+                    SoundManager.mismatch();
+
                     this.state.shake = 25;
                     this.state.impactFlash = 0.3; // Small flash on error
                     this.state.impactFlashColor = '#f00'; // Red flash on miss
                     this.state.sleepTimer = 30; // Small hit stop for errors too
                     if (x !== undefined && y !== undefined) {
-                        // "MISS" text? Or just sound. Maybe a red "!" or "X"
-                        // Or just "0"
-                        // Let's do nothing for now as 0 is boring, but if we want feedback:
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
