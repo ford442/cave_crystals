@@ -40,6 +40,7 @@ export class Game {
             impactFlash: 0,
             impactFlashColor: '#fff',
             sleepTimer: 0, // For hit stop / impact freeze
+            kickY: 0, // Recoil kick
             shakeOffset: { x: 0, y: 0, angle: 0 },
             combo: 0,
             comboTimer: 0,
@@ -145,6 +146,10 @@ export class Game {
         const x = this.launcher.x;
         const y = this.launcher.y;
 
+        // JUICE: Recoil Screen Kick
+        this.state.kickY = 15; // Kick screen down
+        this.state.shake = Math.max(this.state.shake, 5); // Add slight random shake too
+
         // Visual fluff: Muzzle flash particles
         this.createParticles(x, y, '#fff', 10);
 
@@ -178,9 +183,12 @@ export class Game {
     }
 
     calculateShake() {
-        if (this.state.shake > 0) {
+        // JUICE: Apply Recoil Kick
+        const kick = this.state.kickY || 0;
+
+        if (this.state.shake > 0 || kick > 0.1) {
             const dx = (Math.random() - 0.5) * this.state.shake;
-            const dy = (Math.random() - 0.5) * this.state.shake;
+            const dy = (Math.random() - 0.5) * this.state.shake + kick; // Add kick to vertical shake
             const angle = (Math.random() - 0.5) * (this.state.shake * 0.002); // Subtle rotation
 
             this.state.shakeOffset = { x: dx, y: dy, angle: angle };
@@ -233,6 +241,12 @@ export class Game {
         if (this.state.shake > 0) {
             this.state.shake *= 0.9;
             if (this.state.shake < 0.5) this.state.shake = 0;
+        }
+
+        // Recoil Kick decay
+        if (this.state.kickY > 0) {
+            this.state.kickY *= 0.8; // Fast elastic return
+            if (this.state.kickY < 0.5) this.state.kickY = 0;
         }
 
         // Impact Flash decay
