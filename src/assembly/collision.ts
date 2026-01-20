@@ -1,35 +1,5 @@
 // Collision detection module optimized for WebAssembly
 
-export class SporeCollision {
-    x: f64;
-    y: f64;
-    radius: f64;
-    lane: i32;
-    colorIdx: i32;
-
-    constructor(x: f64, y: f64, radius: f64, lane: i32, colorIdx: i32) {
-        this.x = x;
-        this.y = y;
-        this.radius = radius;
-        this.lane = lane;
-        this.colorIdx = colorIdx;
-    }
-}
-
-export class CrystalData {
-    lane: i32;
-    type: i32; // 0 = top, 1 = bottom
-    height: f64;
-    colorIdx: i32;
-
-    constructor(lane: i32, type: i32, height: f64, colorIdx: i32) {
-        this.lane = lane;
-        this.type = type;
-        this.height = height;
-        this.colorIdx = colorIdx;
-    }
-}
-
 // Result flags for collision detection
 // Bit 0: top collision occurred
 // Bit 1: top color matched
