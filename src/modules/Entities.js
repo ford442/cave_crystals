@@ -3,7 +3,7 @@ import { SoundManager } from './Audio.js';
 import { wasmManager } from './WasmManager.js';
 
 export class Crystal {
-    constructor(lane, type, height, colorIdx) {
+    constructor(lane, type, height, colorIdx, spawnDelay = 0) {
         this.lane = lane;
         this.type = type; // 'top' or 'bottom'
         this.height = height;
@@ -11,10 +11,11 @@ export class Crystal {
         this.flash = 0;
         this.shapeSeed = Math.random();
         this.lightPhase = Math.random() * Math.PI * 2; // Randomize start phase for pulsing light
+        this.spawnTime = Date.now() + spawnDelay;
 
         // Elastic Juice properties
         this.scaleX = 1.0;
-        this.scaleY = 1.0;
+        this.scaleY = 0.0; // Start hidden for spawn animation
         this.velScaleX = 0;
         this.velScaleY = 0;
 
@@ -27,6 +28,12 @@ export class Crystal {
     update(growthRate) {
         this.height += growthRate;
         if(this.flash > 0) this.flash -= 0.1;
+
+        // Handle spawn delay
+        if (Date.now() < this.spawnTime) {
+            this.scaleY = 0.0;
+            return;
+        }
 
         // Spring physics for scale
         // Target is 1.0

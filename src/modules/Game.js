@@ -107,8 +107,10 @@ export class Game {
 
     initCrystals() {
         for (let i = 0; i < GAME_CONFIG.lanes; i++) {
-            this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length)));
-            this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length)));
+            // JUICE: Staggered spawn delay for wave effect
+            const delay = i * 100;
+            this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
+            this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
         }
     }
 
