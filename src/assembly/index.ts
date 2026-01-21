@@ -2,8 +2,6 @@
 // Exports all optimized functions for JavaScript integration
 
 export {
-    SporeCollision,
-    CrystalData,
     checkCollisions,
     calculateMatchHeight,
     calculatePenaltyHeight,
@@ -14,7 +12,6 @@ export {
 } from './collision';
 
 export {
-    Particle,
     updateParticle,
     calculateParticleVelocity,
     calculateParticleSize,
@@ -23,6 +20,8 @@ export {
     batchUpdateParticles,
     getShatterVx,
     getShatterVy,
+    getDirectionalVx,
+    getDirectionalVy,
     getBounceVy,
     getSmokeVx,
     getSmokeVy

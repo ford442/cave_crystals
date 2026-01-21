@@ -33,7 +33,14 @@ export class WasmManager {
             const response = await fetch(wasmUrl);
             const buffer = await response.arrayBuffer();
             
-            const wasm = await WebAssembly.instantiate(buffer);
+            const imports = {
+                env: {
+                    abort: (msg, file, line, col) => console.error(`WASM abort: ${msg} at ${file}:${line}:${col}`),
+                    seed: () => Math.random()
+                }
+            };
+
+            const wasm = await WebAssembly.instantiate(buffer, imports);
             
             this.module = wasm.module;
             this.instance = wasm.instance;
@@ -200,6 +207,32 @@ export class WasmManager {
             return this.exports.getBounceVy(vy, damping);
         }
         return -vy * damping;
+    }
+
+    /**
+     * Calculate X velocity for directional particle spray
+     */
+    getDirectionalVx(index, total, force, angle, spread) {
+        if (this.ready && this.exports.getDirectionalVx) {
+            return this.exports.getDirectionalVx(index, total, force, angle, spread);
+        }
+        const fraction = index / total;
+        const offset = (fraction - 0.5) * spread;
+        const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
+        return Math.cos(finalAngle) * force;
+    }
+
+    /**
+     * Calculate Y velocity for directional particle spray
+     */
+    getDirectionalVy(index, total, force, angle, spread) {
+        if (this.ready && this.exports.getDirectionalVy) {
+            return this.exports.getDirectionalVy(index, total, force, angle, spread);
+        }
+        const fraction = index / total;
+        const offset = (fraction - 0.5) * spread;
+        const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
+        return Math.sin(finalAngle) * force;
     }
 
     /**

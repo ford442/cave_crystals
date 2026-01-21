@@ -1,4 +1,5 @@
 // Particle system module optimized for WebAssembly
+import { fastRandom } from "./math";
 
 export class Particle {
     x: f64;
@@ -82,7 +83,7 @@ export function batchUpdateParticles(
  */
 export function getShatterVx(index: i32, total: i32, force: f64): f64 {
     const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
-    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.5;
     return Math.cos(angle) * force + randomVariation;
 }
 
@@ -92,8 +93,31 @@ export function getShatterVx(index: i32, total: i32, force: f64): f64 {
  */
 export function getShatterVy(index: i32, total: i32, force: f64): f64 {
     const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
-    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.5;
     return Math.sin(angle) * force + randomVariation;
+}
+
+/**
+ * Calculate X velocity for a directional burst particle
+ * Distributes particles in a cone
+ */
+export function getDirectionalVx(index: i32, total: i32, force: f64, angle: f64, spread: f64): f64 {
+    const fraction: f64 = f64(index) / f64(total);
+    // Map fraction 0..1 to -spread/2 .. +spread/2
+    const offset: f64 = (fraction - 0.5) * spread;
+    const finalAngle: f64 = angle + offset + (fastRandom() - 0.5) * 0.2;
+    return Math.cos(finalAngle) * force;
+}
+
+/**
+ * Calculate Y velocity for a directional burst particle
+ * Distributes particles in a cone
+ */
+export function getDirectionalVy(index: i32, total: i32, force: f64, angle: f64, spread: f64): f64 {
+    const fraction: f64 = f64(index) / f64(total);
+    const offset: f64 = (fraction - 0.5) * spread;
+    const finalAngle: f64 = angle + offset + (fastRandom() - 0.5) * 0.2;
+    return Math.sin(finalAngle) * force;
 }
 
 /**
