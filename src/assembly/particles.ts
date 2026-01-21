@@ -1,23 +1,5 @@
 // Particle system module optimized for WebAssembly
 
-export class Particle {
-    x: f64;
-    y: f64;
-    vx: f64;
-    vy: f64;
-    life: f64;
-    size: f64;
-
-    constructor(x: f64, y: f64, vx: f64, vy: f64, life: f64, size: f64) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.life = life;
-        this.size = size;
-    }
-}
-
 /**
  * Update a single particle's position and life
  * Returns updated life value
