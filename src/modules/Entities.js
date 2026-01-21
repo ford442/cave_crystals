@@ -94,8 +94,8 @@ export class Spore {
                 topCry.velScaleY -= 0.3; // Compress vertical
                 topCry.velScaleX += 0.2; // Expand horizontal
 
-                // Create particles at impact point
-                createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40);
+                // Create particles at impact point (Spray DOWN)
+                createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
@@ -107,7 +107,8 @@ export class Spore {
                 topCry.velScaleY += 0.1;
                 topCry.velScaleX -= 0.1;
 
-                createParticlesCallback(this.x, topCry.height, '#555', 10);
+                // Rubble (Spray DOWN, wider spread)
+                createParticlesCallback(this.x, topCry.height, '#777', 15, Math.PI / 2, 2.0);
                 scoreCallback(0, false, this.x, topCry.height, '#555'); // Added coordinates
             }
         }
@@ -122,8 +123,8 @@ export class Spore {
                 botCry.velScaleY -= 0.3;
                 botCry.velScaleX += 0.2;
 
-                // Create particles at impact point
-                createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40);
+                // Create particles at impact point (Spray UP)
+                createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2);
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
@@ -135,7 +136,8 @@ export class Spore {
                 botCry.velScaleY += 0.1;
                 botCry.velScaleX -= 0.1;
 
-                createParticlesCallback(this.x, height - botCry.height, '#555', 10);
+                // Rubble (Spray UP, wider spread)
+                createParticlesCallback(this.x, height - botCry.height, '#777', 15, -Math.PI / 2, 2.0);
                 scoreCallback(0, false, this.x, height - botCry.height, '#555'); // Added coordinates
             }
         }

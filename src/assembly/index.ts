@@ -20,6 +20,8 @@ export {
     batchUpdateParticles,
     getShatterVx,
     getShatterVy,
+    getDirectionalVx,
+    getDirectionalVy,
     getBounceVy,
     getSmokeVx,
     getSmokeVy

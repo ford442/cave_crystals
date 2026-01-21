@@ -161,12 +161,18 @@ export class Game {
         this.updateUI();
     }
 
-    createParticles(x, y, color, count = 20) {
+    createParticles(x, y, color, count = 20, angle = null, spread = 1.5) {
         const speed = 8.0;
         for(let i=0; i<count; i++) {
             // Use WASM for juicy explosion pattern
-            const vx = wasmManager.getShatterVx(i, count, speed);
-            const vy = wasmManager.getShatterVy(i, count, speed);
+            let vx, vy;
+            if (angle !== null) {
+                vx = wasmManager.getDirectionalVx(i, count, speed, angle, spread);
+                vy = wasmManager.getDirectionalVy(i, count, speed, angle, spread);
+            } else {
+                vx = wasmManager.getShatterVx(i, count, speed);
+                vy = wasmManager.getShatterVy(i, count, speed);
+            }
 
             this.state.particles.push(new Particle(x, y, color, vx, vy));
         }
