@@ -84,6 +84,15 @@ export class Renderer {
 
         // Draw Crystals with Chromatic Aberration
         gameState.crystals.forEach(c => {
+             // JUICE: Apply Shockwave Distortion
+             // Calculate center of crystal
+             const cX = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+             const cY = c.type === 'top' ? c.height / 2 : this.height - (c.height / 2);
+             const distortion = this.calculateShockwaveDistortion(cX, cY, gameState);
+
+             this.ctx.save();
+             this.ctx.translate(distortion.x, distortion.y);
+
              if (isWarping) {
                  this.ctx.globalCompositeOperation = 'screen';
                  // Red Channel Offset
@@ -101,10 +110,16 @@ export class Renderer {
                  this.ctx.globalCompositeOperation = 'source-over';
              }
              this.drawComplexCrystal(c);
+             this.ctx.restore();
         });
 
         // Draw Launcher with Chromatic Aberration (Motion Blur)
         if (launcher) {
+            // JUICE: Apply Shockwave Distortion
+            const distortion = this.calculateShockwaveDistortion(launcher.x, launcher.y, gameState);
+            this.ctx.save();
+            this.ctx.translate(distortion.x, distortion.y);
+
             if (isWarping) {
                 this.ctx.globalCompositeOperation = 'screen';
                 // Red Channel
@@ -122,6 +137,7 @@ export class Renderer {
                 this.ctx.globalCompositeOperation = 'source-over';
             }
             this.drawCursor(gameState, launcher);
+            this.ctx.restore();
         }
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => {
@@ -724,5 +740,49 @@ export class Renderer {
             g: parseInt(result[2], 16),
             b: parseInt(result[3], 16)
         } : null;
+    }
+
+    calculateShockwaveDistortion(x, y, gameState) {
+        let dx = 0;
+        let dy = 0;
+
+        if (!gameState.shockwaves) return { x: 0, y: 0 };
+
+        gameState.shockwaves.forEach(sw => {
+            // Only affect if shockwave is strong/active
+            if (sw.life <= 0) return;
+
+            const distX = x - sw.x;
+            const distY = y - sw.y;
+            const dist = Math.sqrt(distX * distX + distY * distY);
+
+            // Check if point is near the shockwave ring
+            // The ring expands. We distort things near the radius.
+            // Width of distortion band:
+            const bandWidth = 50;
+            const delta = dist - sw.radius;
+
+            if (Math.abs(delta) < bandWidth) {
+                // We are inside the distortion band
+                // Normalized position in band (-1 to 1)
+                const t = delta / bandWidth;
+
+                // Distortion curve: simple sine hump
+                // At t=0 (on the ring), distortion is max.
+                // At t=1 or -1, distortion is 0.
+                const strength = Math.cos(t * Math.PI / 2);
+
+                // Displacement force
+                // Push AWAY from center
+                const force = 15.0 * strength * sw.life; // Scale by life
+
+                if (dist > 0) {
+                    dx += (distX / dist) * force;
+                    dy += (distY / dist) * force;
+                }
+            }
+        });
+
+        return { x: dx, y: dy };
     }
 }
