@@ -452,15 +452,39 @@ export class Renderer {
             this.ctx.shadowBlur = 20 * alpha;
         }
 
-        this.ctx.beginPath();
-        const s = p.size * alpha; // Scale down with life
-        // Make it a diamond/shard shape
-        this.ctx.moveTo(0, -s);
-        this.ctx.lineTo(s * 0.6, 0);
-        this.ctx.lineTo(0, s);
-        this.ctx.lineTo(-s * 0.6, 0);
-        this.ctx.closePath();
-        this.ctx.fill();
+        if (p.type === 'debris' && p.polyPoints) {
+            this.ctx.beginPath();
+            const s = p.size * alpha; // Scale size, not points directly to keep shape relative
+            // Actually points were calculated with initial size.
+            // But we want to shrink them over time.
+            const shrink = alpha;
+
+            // Note: polyPoints are relative to (0,0)
+            if (p.polyPoints.length > 0) {
+                this.ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                for(let i=1; i<p.polyPoints.length; i++) {
+                    this.ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                }
+            }
+            this.ctx.closePath();
+
+            // Add a stroke to make it look like a rock/crystal chunk
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            this.ctx.lineWidth = 1;
+            this.ctx.stroke();
+            this.ctx.fill();
+
+        } else {
+            this.ctx.beginPath();
+            const s = p.size * alpha; // Scale down with life
+            // Make it a diamond/shard shape
+            this.ctx.moveTo(0, -s);
+            this.ctx.lineTo(s * 0.6, 0);
+            this.ctx.lineTo(0, s);
+            this.ctx.lineTo(-s * 0.6, 0);
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
 
         this.ctx.restore();
 

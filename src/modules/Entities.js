@@ -64,7 +64,7 @@ export class Spore {
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback) {
+    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback) {
         if (!this.active) return;
 
         // Visual Juice: Emit trail particles
@@ -96,6 +96,9 @@ export class Spore {
 
                 // Create particles at impact point (Spray DOWN)
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2);
+                // JUICE: Create Heavy Debris
+                if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4);
+
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
                 topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
@@ -125,6 +128,9 @@ export class Spore {
 
                 // Create particles at impact point (Spray UP)
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2);
+                // JUICE: Create Heavy Debris
+                if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4);
+
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
                 botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
@@ -149,28 +155,29 @@ export class Spore {
 }
 
 export class Particle {
-    constructor(x, y, color, vx = null, vy = null) {
+    constructor(x, y, color, vx = null, vy = null, type = 'spark') {
         this.x = x;
         this.y = y;
+        this.type = type;
 
         if (vx !== null && vy !== null) {
             this.vx = vx;
             this.vy = vy;
         } else {
             const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * 5 + 2;
+            const speed = type === 'debris' ? Math.random() * 8 + 4 : Math.random() * 5 + 2;
             this.vx = Math.cos(angle) * speed;
             this.vy = Math.sin(angle) * speed;
         }
 
         this.life = 1.0;
-        this.maxLife = 1.0;
+        this.maxLife = type === 'debris' ? 2.0 : 1.0;
         this.color = color;
-        this.size = Math.random() * 6 + 2;
+        this.size = type === 'debris' ? Math.random() * 8 + 12 : Math.random() * 6 + 2;
 
         // Juice properties
         this.rotation = Math.random() * Math.PI * 2;
-        this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+        this.rotationSpeed = (Math.random() - 0.5) * (type === 'debris' ? 0.1 : 0.2);
 
         // 3D Rotation Juice
         this.angleX = Math.random() * Math.PI * 2;
@@ -178,9 +185,22 @@ export class Particle {
         this.velAngleX = (Math.random() - 0.5) * 0.2;
         this.velAngleY = (Math.random() - 0.5) * 0.2;
 
-        this.gravity = 0.4;
-        this.friction = 0.98;
+        this.gravity = type === 'debris' ? 0.6 : 0.4;
+        this.friction = type === 'debris' ? 0.95 : 0.98;
         this.floorBounce = true;
+
+        if (type === 'debris') {
+            this.polyPoints = [];
+            const numPoints = 3 + Math.floor(Math.random() * 3); // 3 to 5
+            for(let i=0; i<numPoints; i++) {
+                const angle = (i / numPoints) * Math.PI * 2;
+                const r = this.size * (0.6 + Math.random() * 0.4);
+                this.polyPoints.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r
+                });
+            }
+        }
     }
 
     update(rendererHeight = 800) {

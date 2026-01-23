@@ -174,7 +174,20 @@ export class Game {
                 vy = wasmManager.getShatterVy(i, count, speed);
             }
 
-            this.state.particles.push(new Particle(x, y, color, vx, vy));
+            this.state.particles.push(new Particle(x, y, color, vx, vy, 'spark'));
+        }
+    }
+
+    createDebris(x, y, color, count = 4) {
+        for(let i=0; i<count; i++) {
+             // Debris flies out randomly but generally away from center if we knew it
+             // Here we just explode them
+             const angle = Math.random() * Math.PI * 2;
+             const speed = Math.random() * 5 + 3;
+             const vx = Math.cos(angle) * speed;
+             const vy = Math.sin(angle) * speed;
+
+             this.state.particles.push(new Particle(x, y, color, vx, vy, 'debris'));
         }
     }
 
@@ -399,7 +412,7 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this));
+            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this));
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();
