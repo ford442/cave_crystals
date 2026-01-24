@@ -161,7 +161,7 @@ export class Game {
         this.updateUI();
     }
 
-    createParticles(x, y, color, count = 20, angle = null, spread = 1.5) {
+    createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
         const speed = 8.0;
         for(let i=0; i<count; i++) {
             // Use WASM for juicy explosion pattern
@@ -174,7 +174,7 @@ export class Game {
                 vy = wasmManager.getShatterVy(i, count, speed);
             }
 
-            this.state.particles.push(new Particle(x, y, color, vx, vy, 'spark'));
+            this.state.particles.push(new Particle(x, y, color, vx, vy, type));
         }
     }
 
@@ -507,7 +507,7 @@ export class Game {
             // Spawn many particles
             // Use crystal color
             const color = COLORS[c.colorIdx].hex;
-            this.createParticles(x, y, color, 30); // 30 particles per crystal
+            this.createParticles(x, y, color, 30, null, 1.5, 'shard'); // 30 shards per crystal
             this.createShockwave(x, y, color);
         });
 

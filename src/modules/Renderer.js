@@ -452,7 +452,7 @@ export class Renderer {
             this.ctx.shadowBlur = 20 * alpha;
         }
 
-        if (p.type === 'debris' && p.polyPoints) {
+        if ((p.type === 'debris' || p.type === 'shard') && p.polyPoints) {
             this.ctx.beginPath();
             const s = p.size * alpha; // Scale size, not points directly to keep shape relative
             // Actually points were calculated with initial size.
