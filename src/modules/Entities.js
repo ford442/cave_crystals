@@ -95,7 +95,7 @@ export class Spore {
                 topCry.velScaleX += 0.2; // Expand horizontal
 
                 // Create particles at impact point (Spray DOWN)
-                createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2);
+                createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2, 'shard');
                 // JUICE: Create Heavy Debris
                 if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4);
 
@@ -127,7 +127,7 @@ export class Spore {
                 botCry.velScaleX += 0.2;
 
                 // Create particles at impact point (Spray UP)
-                createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2);
+                createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2, 'shard');
                 // JUICE: Create Heavy Debris
                 if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4);
 
@@ -171,13 +171,19 @@ export class Particle {
         }
 
         this.life = 1.0;
-        this.maxLife = type === 'debris' ? 2.0 : 1.0;
+        this.maxLife = (type === 'debris' || type === 'shard') ? 2.0 : 1.0;
         this.color = color;
-        this.size = type === 'debris' ? Math.random() * 8 + 12 : Math.random() * 6 + 2;
+        if (type === 'debris') {
+            this.size = Math.random() * 8 + 12;
+        } else if (type === 'shard') {
+            this.size = Math.random() * 10 + 8; // Longer shards
+        } else {
+            this.size = Math.random() * 6 + 2;
+        }
 
         // Juice properties
         this.rotation = Math.random() * Math.PI * 2;
-        this.rotationSpeed = (Math.random() - 0.5) * (type === 'debris' ? 0.1 : 0.2);
+        this.rotationSpeed = (Math.random() - 0.5) * ((type === 'debris' || type === 'shard') ? 0.1 : 0.2);
 
         // 3D Rotation Juice
         this.angleX = Math.random() * Math.PI * 2;
@@ -185,8 +191,13 @@ export class Particle {
         this.velAngleX = (Math.random() - 0.5) * 0.2;
         this.velAngleY = (Math.random() - 0.5) * 0.2;
 
-        this.gravity = type === 'debris' ? 0.6 : 0.4;
-        this.friction = type === 'debris' ? 0.95 : 0.98;
+        if (type === 'shard') {
+            this.gravity = 0.8; // Heavy
+            this.friction = 0.99; // Aerodynamic
+        } else {
+            this.gravity = type === 'debris' ? 0.6 : 0.4;
+            this.friction = type === 'debris' ? 0.95 : 0.98;
+        }
         this.floorBounce = true;
 
         if (type === 'debris') {
@@ -200,6 +211,15 @@ export class Particle {
                     y: Math.sin(angle) * r
                 });
             }
+        } else if (type === 'shard') {
+            this.polyPoints = [];
+            // Create a jagged shard (elongated triangle)
+            // Tip
+            this.polyPoints.push({ x: 0, y: -this.size });
+            // Right base
+            this.polyPoints.push({ x: this.size * 0.3, y: this.size });
+            // Left base
+            this.polyPoints.push({ x: -this.size * 0.3, y: this.size });
         }
     }
 
