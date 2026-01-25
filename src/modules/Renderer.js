@@ -81,6 +81,7 @@ export class Renderer {
         }
 
         this.drawGuides();
+        this.drawTargetingSystem(gameState, launcher);
 
         // Draw Crystals with Chromatic Aberration
         gameState.crystals.forEach(c => {
@@ -276,20 +277,137 @@ export class Renderer {
         }
     }
 
+    drawTargetingSystem(gameState, launcher) {
+        if (!gameState.active || !launcher) return;
+
+        const targetLane = launcher.targetLane;
+        const targetLaneX = (targetLane * this.laneWidth) + (this.laneWidth / 2);
+
+        // Find target crystals
+        const targets = gameState.crystals.filter(c => c.lane === targetLane);
+        const nextColorIdx = gameState.nextSporeColorIdx;
+        const time = Date.now();
+
+        // Draw Laser Sight
+        // Determine "Lock Status" based on if any crystal matches
+        const hasMatch = targets.some(c => c.colorIdx === nextColorIdx);
+
+        this.ctx.save();
+
+        const beamX = targetLaneX;
+
+        if (hasMatch) {
+            // MATCH: High Energy Beam
+            const col = COLORS[nextColorIdx].hex;
+            this.ctx.strokeStyle = col;
+            this.ctx.lineWidth = 3;
+            this.ctx.shadowColor = col;
+            this.ctx.shadowBlur = 15;
+            this.ctx.setLineDash([20, 10]);
+            this.ctx.lineDashOffset = -(time / 10); // Fast flow
+        } else {
+            // NO MATCH: Searching/Scanning Beam
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            this.ctx.lineWidth = 1;
+            this.ctx.shadowBlur = 0;
+            this.ctx.setLineDash([5, 15]);
+            this.ctx.lineDashOffset = -(time / 50); // Slow flow
+        }
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(beamX, 0);
+        this.ctx.lineTo(beamX, this.height);
+        this.ctx.stroke();
+
+        this.ctx.setLineDash([]);
+
+        // Draw Reticles on Targets
+        targets.forEach(c => {
+            const isMatch = c.colorIdx === nextColorIdx;
+
+            // Calculate Crystal Tip Position
+            const cX = beamX; // Assumes crystal is centered in lane
+            // Adding shake
+            const shakeX = c.shakeX || 0;
+            const shakeY = c.shakeY || 0;
+
+            let tipY;
+             if (c.type === 'top') {
+                 tipY = c.height + shakeY;
+             } else {
+                 tipY = this.height - c.height + shakeY;
+             }
+
+             this.ctx.save();
+             this.ctx.translate(cX + shakeX, tipY);
+
+             // Reticle Animation
+             if (isMatch) {
+                 const spin = time / 100;
+                 const scale = 1.0 + Math.sin(time / 50) * 0.2;
+                 this.ctx.rotate(spin);
+                 this.ctx.scale(scale, scale);
+
+                 this.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+                 this.ctx.lineWidth = 3;
+                 this.ctx.shadowColor = COLORS[c.colorIdx].hex;
+                 this.ctx.shadowBlur = 10;
+
+                 // Draw Bracket
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, 0, Math.PI * 2); // Full ring for match
+                 this.ctx.stroke();
+
+                 // Inner crosshair
+                 this.ctx.beginPath();
+                 this.ctx.moveTo(-10, 0); this.ctx.lineTo(10, 0);
+                 this.ctx.moveTo(0, -10); this.ctx.lineTo(0, 10);
+                 this.ctx.stroke();
+
+             } else {
+                 // No match - Warning/Scanning
+                 const spin = time / 1000; // Slow spin
+                 this.ctx.rotate(spin);
+
+                 this.ctx.strokeStyle = 'rgba(255, 50, 50, 0.5)'; // Reddish warning
+                 this.ctx.lineWidth = 2;
+
+                 // Draw Broken Bracket
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, 0, Math.PI * 0.5);
+                 this.ctx.stroke();
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, Math.PI, Math.PI * 1.5);
+                 this.ctx.stroke();
+             }
+
+             this.ctx.restore();
+
+             // Connecting Line from Launcher to Target Tip
+             // Only draw if active match or maybe always?
+             // Let's draw it faint if no match, strong if match
+             this.ctx.save();
+             this.ctx.beginPath();
+             this.ctx.moveTo(launcher.x, launcher.y); // Start at actual launcher pos
+             this.ctx.lineTo(cX + shakeX, tipY);
+
+             if (isMatch) {
+                 this.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+                 this.ctx.globalAlpha = 0.6;
+                 this.ctx.lineWidth = 2;
+             } else {
+                 this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                 this.ctx.lineWidth = 1;
+             }
+             this.ctx.stroke();
+             this.ctx.restore();
+        });
+
+        this.ctx.restore();
+    }
+
     drawCursor(gameState, launcher, colorOverride = null) {
         if(!gameState.active || !launcher) return;
-
-        // Draw Guide Line (only on main pass)
-        if (!colorOverride) {
-            const targetLaneX = (launcher.targetLane * this.laneWidth) + (this.laneWidth / 2);
-            this.ctx.beginPath();
-            this.ctx.setLineDash([5, 15]);
-            this.ctx.moveTo(targetLaneX, 0);
-            this.ctx.lineTo(targetLaneX, this.height);
-            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-        }
 
         // Draw Actual Launcher Entity (Visual Position)
         this.ctx.save();
