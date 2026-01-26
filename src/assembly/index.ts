@@ -24,7 +24,9 @@ export {
     getDirectionalVy,
     getBounceVy,
     getSmokeVx,
-    getSmokeVy
+    getSmokeVy,
+    calculateHomingVx,
+    calculateHomingVy
 } from './particles';
 
 export {

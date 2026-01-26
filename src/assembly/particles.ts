@@ -48,7 +48,7 @@ export function isParticleAlive(life: f64): bool {
 /**
  * Batch process multiple particles
  * This is optimized for processing many particles at once
- * Currently a placeholder for future batch optimization
+ * Currently a placeholder for future optimization
  */
 export function batchUpdateParticles(
     count: i32,
@@ -121,4 +121,39 @@ export function getSmokeVx(random: f64): f64 {
  */
 export function getSmokeVy(random: f64): f64 {
     return -(random * 2.0 + 1.0);
+}
+
+/**
+ * Calculate X velocity for homing particle (steering towards target)
+ * Uses steering behavior: Steering = Desired - Velocity
+ */
+export function calculateHomingVx(currVx: f64, currVy: f64, x: f64, y: f64, tx: f64, ty: f64, speed: f64, agility: f64): f64 {
+    const dx: f64 = tx - x;
+    const dy: f64 = ty - y;
+    const dist: f64 = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 1.0) return currVx;
+
+    // Desired velocity
+    const desiredVx: f64 = (dx / dist) * speed;
+
+    // Lerp current to desired
+    return currVx + (desiredVx - currVx) * agility;
+}
+
+/**
+ * Calculate Y velocity for homing particle (steering towards target)
+ */
+export function calculateHomingVy(currVx: f64, currVy: f64, x: f64, y: f64, tx: f64, ty: f64, speed: f64, agility: f64): f64 {
+    const dx: f64 = tx - x;
+    const dy: f64 = ty - y;
+    const dist: f64 = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 1.0) return currVy;
+
+    // Desired velocity
+    const desiredVy: f64 = (dy / dist) * speed;
+
+    // Lerp current to desired
+    return currVy + (desiredVy - currVy) * agility;
 }

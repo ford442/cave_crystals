@@ -157,6 +157,10 @@ export class Renderer {
             gameState.floatingTexts.forEach(ft => this.drawFloatingText(ft));
         }
 
+        if (gameState.soulParticles) {
+            gameState.soulParticles.forEach(sp => this.drawSoulParticle(sp));
+        }
+
         this.ctx.restore();
 
         // Draw Impact Flash (independent of shake translation)
@@ -242,7 +246,14 @@ export class Renderer {
             drawLight(launcher.x, launcher.y, '#00FFFF', 100 + launcher.recoil * 5, 0.4);
         }
 
-        // 4. Particle Sparkles (Only large ones or groups to save perf)
+        // 4. Soul Particles Light
+        if (gameState.soulParticles) {
+             gameState.soulParticles.forEach(sp => {
+                 drawLight(sp.x, sp.y, sp.color, 40, 0.6);
+             });
+        }
+
+        // 5. Particle Sparkles (Only large ones or groups to save perf)
         // We can batch draw a faint glow for particles?
         // Or just skip for performance as there can be many.
         // Let's do a simple iterate for large particles only
@@ -617,6 +628,28 @@ export class Renderer {
         this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.globalAlpha = 1.0;
+    }
+
+    drawSoulParticle(sp) {
+        this.ctx.save();
+        this.ctx.translate(sp.x, sp.y);
+
+        this.ctx.fillStyle = sp.color;
+        this.ctx.shadowBlur = 15;
+        this.ctx.shadowColor = sp.color;
+
+        // Glowing Orb
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, sp.size, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Inner white core
+        this.ctx.fillStyle = '#fff';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, sp.size * 0.4, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.restore();
     }
 
     drawFloatingText(ft) {
