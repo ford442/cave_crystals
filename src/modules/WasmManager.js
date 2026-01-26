@@ -254,6 +254,38 @@ export class WasmManager {
         }
         return -(random * 2.0 + 1.0);
     }
+
+    /**
+     * Calculate X velocity for homing particle
+     */
+    calculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility) {
+        if (this.ready && this.exports.calculateHomingVx) {
+            return this.exports.calculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility);
+        }
+        // Fallback
+        const dx = tx - x;
+        const dy = ty - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1.0) return currVx;
+        const desiredVx = (dx / dist) * speed;
+        return currVx + (desiredVx - currVx) * agility;
+    }
+
+    /**
+     * Calculate Y velocity for homing particle
+     */
+    calculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility) {
+        if (this.ready && this.exports.calculateHomingVy) {
+            return this.exports.calculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility);
+        }
+        // Fallback
+        const dx = tx - x;
+        const dy = ty - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1.0) return currVy;
+        const desiredVy = (dy / dist) * speed;
+        return currVy + (desiredVy - currVy) * agility;
+    }
 }
 
 // Create and export a singleton instance

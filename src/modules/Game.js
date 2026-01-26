@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -33,6 +33,7 @@ export class Game {
             particles: [],
             shockwaves: [],
             floatingTexts: [],
+            soulParticles: [],
             nextSporeColorIdx: 0,
             growthMultiplier: 1,
             shake: 0,
@@ -91,6 +92,7 @@ export class Game {
         this.state.particles = [];
         this.state.shockwaves = [];
         this.state.floatingTexts = [];
+        this.state.soulParticles = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
@@ -290,12 +292,6 @@ export class Game {
             if (this.state.zoom < 1.001) this.state.zoom = 1.0;
         }
 
-        // Score lerp
-        this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
-        if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
-            this.state.displayScore = this.state.score;
-        }
-
         this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);
         const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
 
@@ -358,16 +354,20 @@ export class Game {
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
             s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y, color) => {
-                this.state.score += points;
-
-                // Level Up Check
-                const newLevel = Math.floor(this.state.score / 500) + 1;
-                if (newLevel > this.state.level) {
-                    this.state.level = newLevel;
-                    this.triggerLevelUp();
-                }
 
                 if (isMatch) {
+                    // Spawn Soul Particles for Collection Juice
+                    const soulCount = 3 + Math.floor(Math.random() * 2);
+                    // Target top-left score area
+                    const tx = 60;
+                    const ty = 60;
+
+                    for(let k=0; k<soulCount; k++) {
+                        let val = Math.floor(points / soulCount);
+                        if (k === 0) val += points % soulCount;
+                        this.state.soulParticles.push(new SoulParticle(x, y, color, tx, ty, val));
+                    }
+
                     // JUICE: Combo Logic
                     this.state.combo++;
                     this.state.comboTimer = 2000; // 2 seconds to keep combo
@@ -419,6 +419,14 @@ export class Game {
             }
         }
 
+        // Pass trail callback for juice
+        this.launcher.update(this.createTrailParticle.bind(this));
+
+        // Shared visual updates (including Soul Particles and Score Lerp)
+        this.updateSharedVisuals(dt);
+    }
+
+    updateSharedVisuals(dt) {
         // Update Particles
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
@@ -433,6 +441,26 @@ export class Game {
             if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
         }
 
+        // Update Soul Particles
+        for (let i = this.state.soulParticles.length - 1; i >= 0; i--) {
+            let sp = this.state.soulParticles[i];
+            const arrived = sp.update(this.createTrailParticle.bind(this));
+
+            if (arrived) {
+                if (sp.scoreValue > 0) {
+                    this.state.score += sp.scoreValue;
+
+                    // Level Up Check
+                    const newLevel = Math.floor(this.state.score / 500) + 1;
+                    if (newLevel > this.state.level) {
+                        this.state.level = newLevel;
+                        this.triggerLevelUp();
+                    }
+                }
+                this.state.soulParticles.splice(i, 1);
+            }
+        }
+
         // Update Floating Texts
         for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
             let ft = this.state.floatingTexts[i];
@@ -440,17 +468,29 @@ export class Game {
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
 
-        // Pass trail callback for juice
-        this.launcher.update(this.createTrailParticle.bind(this));
+        // Score lerp and UI update
+        const oldDisplay = this.state.displayScore;
+        this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
+        if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
+            this.state.displayScore = this.state.score;
+        }
+
+        // Only update DOM if score changed significantly (counting up effect)
+        if (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore)) {
+             this.ui.score.innerText = Math.floor(this.state.displayScore);
+             // Pulse effect on every tick of increase
+             const scale = 1.0 + (this.state.shake * 0.01) + 0.1;
+             this.ui.score.style.transform = `scale(${scale})`;
+        } else {
+             // Passive pulse from shake
+             const scale = 1.0 + (this.state.shake * 0.01);
+             this.ui.score.style.transform = `scale(${scale})`;
+        }
     }
 
     updateUI() {
         this.ui.score.innerText = Math.floor(this.state.displayScore);
         this.ui.level.innerText = Math.floor(this.state.score / 500) + 1;
-
-        // Scale pulse effect on score if recently changed
-        const scale = 1.0 + (this.state.shake * 0.01);
-        this.ui.score.style.transform = `scale(${scale})`;
 
         const nextCol = COLORS[this.state.nextSporeColorIdx];
         this.ui.preview.style.backgroundColor = nextCol.hex;
@@ -528,25 +568,6 @@ export class Game {
             if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
-        // Update Particles
-        for (let i = this.state.particles.length - 1; i >= 0; i--) {
-            let p = this.state.particles[i];
-            p.update(this.renderer.height);
-            if (p.life <= 0) this.state.particles.splice(i, 1);
-        }
-
-        // Update Shockwaves
-        for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
-            let sw = this.state.shockwaves[i];
-            sw.update();
-            if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
-        }
-
-        // Update Floating Texts
-        for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
-            let ft = this.state.floatingTexts[i];
-            ft.update();
-            if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
-        }
+        this.updateSharedVisuals(dt);
     }
 }

@@ -390,3 +390,54 @@ export class Launcher {
         this.scaleY += (1.0 - this.scaleY) * this.squashRecovery;
     }
 }
+
+export class SoulParticle {
+    constructor(x, y, color, targetX, targetY, scoreValue) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.targetX = targetX;
+        this.targetY = targetY;
+        this.scoreValue = scoreValue;
+
+        // Initial random burst
+        this.vx = (Math.random() - 0.5) * 10;
+        this.vy = (Math.random() - 0.5) * 10;
+
+        this.life = 1.0;
+        this.speed = 20.0; // Fast homing speed
+        this.agility = 0.08; // Turn rate
+        this.size = 8;
+        this.trailTimer = 0;
+        this.active = true;
+    }
+
+    update(createTrailCallback) {
+        // Use WASM for homing physics
+        this.vx = wasmManager.calculateHomingVx(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility);
+        this.vy = wasmManager.calculateHomingVy(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility);
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Visual Trail
+        this.trailTimer++;
+        if (this.trailTimer % 3 === 0 && createTrailCallback) {
+             createTrailCallback(this.x, this.y, this.color);
+        }
+
+        // Check arrival
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < 900) { // 30px radius arrival threshold
+            return true; // Arrived
+        }
+
+        this.life -= 0.005;
+        if (this.life <= 0) return true; // Timeout
+
+        return false;
+    }
+}
