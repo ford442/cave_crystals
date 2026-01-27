@@ -163,10 +163,45 @@ export class Renderer {
 
         this.ctx.restore();
 
+        // JUICE: Red Alert Vignette
+        if (gameState.criticalIntensity > 0.01) {
+            this.drawVignette(gameState.criticalIntensity);
+        }
+
         // Draw Impact Flash (independent of shake translation)
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
         }
+    }
+
+    drawVignette(intensity) {
+        if (!this.ctx) return;
+        this.ctx.save();
+
+        // Pulse alpha
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        const alpha = intensity * 0.6 * pulse; // Max 0.6 opacity
+
+        // Radial gradient from center out
+        // Use larger dimension for radius to ensure coverage
+        const radius = Math.max(this.width, this.height);
+        const grad = this.ctx.createRadialGradient(this.width / 2, this.height / 2, this.height * 0.2, this.width / 2, this.height / 2, radius * 0.8);
+        grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
+        grad.addColorStop(1, `rgba(255, 0, 0, ${alpha})`);
+
+        this.ctx.fillStyle = grad;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // Add "Danger" text if intensity is very high
+        if (intensity > 0.8 && pulse > 0.8) {
+             this.ctx.font = 'bold 60px Righteous, monospace';
+             this.ctx.fillStyle = `rgba(255, 0, 0, ${intensity})`;
+             this.ctx.textAlign = 'center';
+             this.ctx.textBaseline = 'middle';
+             this.ctx.fillText("CRITICAL!", this.width / 2, this.height * 0.3);
+        }
+
+        this.ctx.restore();
     }
 
     drawLighting(gameState, launcher) {

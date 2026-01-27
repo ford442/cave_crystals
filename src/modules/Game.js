@@ -46,7 +46,9 @@ export class Game {
             combo: 0,
             comboTimer: 0,
             zoom: 1.0,
-            zoomFocus: { x: 0, y: 0 }
+            zoomFocus: { x: 0, y: 0 },
+            criticalIntensity: 0,
+            heartbeatTimer: 0
         };
 
         // Initialize WASM asynchronously
@@ -87,6 +89,8 @@ export class Game {
         this.state.comboTimer = 0;
         this.state.zoom = 1.0;
         this.state.zoomFocus = { x: this.renderer.width / 2, y: this.renderer.height / 2 };
+        this.state.criticalIntensity = 0;
+        this.state.heartbeatTimer = 0;
         this.state.crystals = [];
         this.state.spores = [];
         this.state.particles = [];
@@ -296,6 +300,7 @@ export class Game {
         const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
 
         let gameOver = false;
+        let maxCritical = 0;
 
         this.state.crystals.forEach(c => {
             c.update(currentGrowth);
@@ -317,6 +322,12 @@ export class Game {
                     c.shakeX = (Math.random() - 0.5) * 4;
                     c.shakeY = (Math.random() - 0.5) * 4;
 
+                    // Calculate intensity (0.0 to 1.0)
+                    const over = totalHeight - dangerThreshold;
+                    const range = this.renderer.height * 0.25;
+                    const intensity = Math.min(1.0, over / range);
+                    if (intensity > maxCritical) maxCritical = intensity;
+
                     // Emit smoke particles occasionally
                     if (Math.random() < 0.1) {
                          const x = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + c.shakeX;
@@ -336,6 +347,18 @@ export class Game {
                 }
             }
         });
+
+        // JUICE: Update Critical Intensity & Heartbeat
+        this.state.criticalIntensity += (maxCritical - this.state.criticalIntensity) * 0.1;
+
+        if (this.state.criticalIntensity > 0.1) {
+             this.state.heartbeatTimer -= dt;
+             if (this.state.heartbeatTimer <= 0) {
+                 SoundManager.heartbeat();
+                 // Faster beat as intensity increases (1000ms down to 300ms)
+                 this.state.heartbeatTimer = 1000 - (this.state.criticalIntensity * 700);
+             }
+        }
 
         if (gameOver) {
             this.state.active = false;
@@ -532,6 +555,7 @@ export class Game {
         this.state.shake = 60; // Huge shake
         this.state.impactFlash = 1.0; // Full white flash
         this.state.impactFlashColor = '#fff';
+        this.state.criticalIntensity = 0; // Stop red alert
 
         this.state.crystals.forEach(c => {
             // Calculate center of crystal for explosion origin
