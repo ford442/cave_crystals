@@ -48,7 +48,10 @@ export class Game {
             zoom: 1.0,
             zoomFocus: { x: 0, y: 0 },
             criticalIntensity: 0,
-            heartbeatTimer: 0
+            heartbeatTimer: 0,
+            timeScale: 1.0,
+            targetTimeScale: 1.0,
+            slowMoTimer: 0
         };
 
         // Initialize WASM asynchronously
@@ -91,6 +94,9 @@ export class Game {
         this.state.zoomFocus = { x: this.renderer.width / 2, y: this.renderer.height / 2 };
         this.state.criticalIntensity = 0;
         this.state.heartbeatTimer = 0;
+        this.state.timeScale = 1.0;
+        this.state.targetTimeScale = 1.0;
+        this.state.slowMoTimer = 0;
         this.state.crystals = [];
         this.state.spores = [];
         this.state.particles = [];
@@ -235,6 +241,10 @@ export class Game {
     triggerLevelUp() {
         SoundManager.levelUp();
 
+        // Time Dilation (Slow Motion)
+        this.state.targetTimeScale = 0.05;
+        this.state.slowMoTimer = 2000;
+
         // Massive Shake
         this.state.shake = 30;
 
@@ -264,7 +274,18 @@ export class Game {
     }
 
     update(dt) {
-        // Shake decay
+        // Time Dilation Logic
+        if (this.state.slowMoTimer > 0) {
+            this.state.slowMoTimer -= dt;
+            this.state.timeScale += (this.state.targetTimeScale - this.state.timeScale) * 0.2;
+        } else {
+            this.state.timeScale += (1.0 - this.state.timeScale) * 0.2;
+            if (Math.abs(1.0 - this.state.timeScale) < 0.01) this.state.timeScale = 1.0;
+        }
+        const timeScale = this.state.timeScale;
+
+        // Shake decay (affected by timeScale?) - No, shake is visual and should probably remain snappy or maybe decay slower?
+        // Let's keep shake decay independent of timeScale for visceral feel
         if (this.state.shake > 0) {
             this.state.shake *= 0.9;
             if (this.state.shake < 0.5) this.state.shake = 0;
@@ -282,9 +303,9 @@ export class Game {
             if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
-        // Combo Timer decay
+        // Combo Timer decay (Game time)
         if (this.state.comboTimer > 0) {
-            this.state.comboTimer -= dt;
+            this.state.comboTimer -= dt * timeScale;
             if (this.state.comboTimer <= 0) {
                 this.state.combo = 0;
             }
@@ -297,13 +318,13 @@ export class Game {
         }
 
         this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);
-        const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
+        const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier) * timeScale;
 
         let gameOver = false;
         let maxCritical = 0;
 
         this.state.crystals.forEach(c => {
-            c.update(currentGrowth);
+            c.update(currentGrowth, timeScale);
 
             // JUICE: Critical Mass System
             // Reset shake
@@ -329,7 +350,7 @@ export class Game {
                     if (intensity > maxCritical) maxCritical = intensity;
 
                     // Emit smoke particles occasionally
-                    if (Math.random() < 0.1) {
+                    if (Math.random() < 0.1 * timeScale) {
                          const x = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + c.shakeX;
                          const tipY = c.type === 'top' ? c.height : this.renderer.height - c.height;
 
@@ -395,6 +416,12 @@ export class Game {
                     this.state.combo++;
                     this.state.comboTimer = 2000; // 2 seconds to keep combo
 
+                    // Time Dilation on High Combo
+                    if (this.state.combo > 2) {
+                        this.state.targetTimeScale = 0.3;
+                        this.state.slowMoTimer = 400; // Short burst of slow-mo
+                    }
+
                     // Pitch Shift
                     const pitch = 1.0 + (Math.min(this.state.combo, 10) * 0.1);
                     SoundManager.match(pitch);
@@ -435,7 +462,7 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this));
+            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this), timeScale);
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();
@@ -443,31 +470,31 @@ export class Game {
         }
 
         // Pass trail callback for juice
-        this.launcher.update(this.createTrailParticle.bind(this));
+        this.launcher.update(this.createTrailParticle.bind(this), timeScale);
 
         // Shared visual updates (including Soul Particles and Score Lerp)
-        this.updateSharedVisuals(dt);
+        this.updateSharedVisuals(dt, timeScale);
     }
 
-    updateSharedVisuals(dt) {
+    updateSharedVisuals(dt, timeScale = 1.0) {
         // Update Particles
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
-            p.update(this.renderer.height);
+            p.update(this.renderer.height, timeScale);
             if (p.life <= 0) this.state.particles.splice(i, 1);
         }
 
         // Update Shockwaves
         for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
             let sw = this.state.shockwaves[i];
-            sw.update();
+            sw.update(timeScale);
             if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
         }
 
         // Update Soul Particles
         for (let i = this.state.soulParticles.length - 1; i >= 0; i--) {
             let sp = this.state.soulParticles[i];
-            const arrived = sp.update(this.createTrailParticle.bind(this));
+            const arrived = sp.update(this.createTrailParticle.bind(this), timeScale);
 
             if (arrived) {
                 if (sp.scoreValue > 0) {
@@ -487,7 +514,7 @@ export class Game {
         // Update Floating Texts
         for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
             let ft = this.state.floatingTexts[i];
-            ft.update();
+            ft.update(timeScale);
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
 
@@ -552,6 +579,9 @@ export class Game {
 
     shatterAllCrystals() {
         // JUICE: Massive explosion of all crystals
+        this.state.targetTimeScale = 0.1;
+        this.state.slowMoTimer = 3000;
+
         this.state.shake = 60; // Huge shake
         this.state.impactFlash = 1.0; // Full white flash
         this.state.impactFlashColor = '#fff';
