@@ -25,9 +25,9 @@ export class Crystal {
         this.shakeY = 0;
     }
 
-    update(growthRate) {
+    update(growthRate, timeScale = 1.0) {
         this.height += growthRate;
-        if(this.flash > 0) this.flash -= 0.1;
+        if(this.flash > 0) this.flash -= 0.1 * timeScale;
 
         // Handle spawn delay
         if (Date.now() < this.spawnTime) {
@@ -40,15 +40,16 @@ export class Crystal {
         const k = 0.2; // Spring constant
         const d = 0.85; // Damping
 
+        // Apply timeScale to spring physics
         const fx = (1.0 - this.scaleX) * k;
-        this.velScaleX += fx;
-        this.velScaleX *= d;
-        this.scaleX += this.velScaleX;
+        this.velScaleX += fx * timeScale;
+        this.velScaleX *= (1 - (1 - d) * timeScale);
+        this.scaleX += this.velScaleX * timeScale;
 
         const fy = (1.0 - this.scaleY) * k;
-        this.velScaleY += fy;
-        this.velScaleY *= d;
-        this.scaleY += this.velScaleY;
+        this.velScaleY += fy * timeScale;
+        this.velScaleY *= (1 - (1 - d) * timeScale);
+        this.scaleY += this.velScaleY * timeScale;
     }
 }
 
@@ -64,15 +65,15 @@ export class Spore {
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback) {
+    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, timeScale = 1.0) {
         if (!this.active) return;
 
         // Visual Juice: Emit trail particles
-        if (createTrailCallback && Math.random() > 0.3) {
+        if (createTrailCallback && Math.random() < 0.7 * timeScale) {
              createTrailCallback(this.x, this.y, COLORS[this.colorIdx].hex);
         }
 
-        this.radius += GAME_CONFIG.sporeExpandRate;
+        this.radius += GAME_CONFIG.sporeExpandRate * timeScale;
 
         const topCry = crystals.find(c => c.lane === this.lane && c.type === 'top');
         const botCry = crystals.find(c => c.lane === this.lane && c.type === 'bottom');
@@ -223,13 +224,16 @@ export class Particle {
         }
     }
 
-    update(rendererHeight = 800) {
+    update(rendererHeight = 800, timeScale = 1.0) {
         // Apply physics
-        this.x += this.vx;
-        this.y += this.vy;
-        this.vy += this.gravity;
-        this.vx *= this.friction;
-        this.vy *= this.friction;
+        this.x += this.vx * timeScale;
+        this.y += this.vy * timeScale;
+        this.vy += this.gravity * timeScale;
+
+        // Friction with timeScale
+        const adjFriction = 1 - (1 - this.friction) * timeScale;
+        this.vx *= adjFriction;
+        this.vy *= adjFriction;
 
         // Floor Bounce
         if (this.floorBounce && this.y > rendererHeight) {
@@ -247,12 +251,12 @@ export class Particle {
         }
 
         // Update rotation
-        this.rotation += this.rotationSpeed;
-        this.angleX += this.velAngleX;
-        this.angleY += this.velAngleY;
+        this.rotation += this.rotationSpeed * timeScale;
+        this.angleX += this.velAngleX * timeScale;
+        this.angleY += this.velAngleY * timeScale;
 
         // Decay
-        this.life -= 0.015;
+        this.life -= 0.015 * timeScale;
     }
 }
 
@@ -269,11 +273,11 @@ export class TrailParticle {
         this.vy = (Math.random() - 0.5) * 0.5;
     }
 
-    update() {
-        this.x += this.vx;
-        this.y += this.vy;
-        this.life -= 0.05; // Fade fast
-        this.size *= 0.9; // Shrink
+    update(timeScale = 1.0) {
+        this.x += this.vx * timeScale;
+        this.y += this.vy * timeScale;
+        this.life -= 0.05 * timeScale; // Fade fast
+        this.size *= (1 - 0.1 * timeScale); // Shrink
     }
 }
 
@@ -288,10 +292,10 @@ export class Shockwave {
         this.width = 10;
     }
 
-    update() {
-        this.radius += 10; // Expand fast
-        this.life -= 0.05; // Fade out
-        this.width = Math.max(0, this.width - 0.5);
+    update(timeScale = 1.0) {
+        this.radius += 10 * timeScale; // Expand fast
+        this.life -= 0.05 * timeScale; // Fade out
+        this.width = Math.max(0, this.width - 0.5 * timeScale);
     }
 }
 
@@ -307,17 +311,17 @@ export class FloatingText {
         this.targetScale = targetScale;
     }
 
-    update() {
-        this.y += this.vy;
-        this.life -= 0.02;
+    update(timeScale = 1.0) {
+        this.y += this.vy * timeScale;
+        this.life -= 0.02 * timeScale;
 
         // Pop in effect
         if (this.scale < this.targetScale) {
-            this.scale += (this.targetScale - this.scale) * 0.2;
+            this.scale += (this.targetScale - this.scale) * 0.2 * timeScale;
         }
 
         // Slow down upward movement
-        this.vy *= 0.95;
+        this.vy *= (1 - (1 - 0.95) * timeScale);
     }
 }
 
@@ -355,12 +359,13 @@ export class Launcher {
         this.scaleY = 0.7; // Squash vertical
     }
 
-    update(createTrailCallback) {
+    update(createTrailCallback, timeScale = 1.0) {
         // Lerp position
         const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
         const dx = targetX - this.x;
 
-        const moveStep = dx * this.lerpFactor;
+        const f = 1 - Math.pow(1 - this.lerpFactor, timeScale);
+        const moveStep = dx * f;
         this.x += moveStep;
         this.speed = Math.abs(moveStep);
 
@@ -377,17 +382,18 @@ export class Launcher {
         const targetTilt = dx * 0.08; // Increased tilt sensitivity
 
         // Smoothly interpolate tilt
-        this.tilt += (targetTilt - this.tilt) * 0.15; // Slightly smoother lerp
+        const fTilt = 1 - Math.pow(1 - 0.15, timeScale);
+        this.tilt += (targetTilt - this.tilt) * fTilt;
 
         // Recover recoil
         if (this.recoil > 0) {
-            this.recoil -= (this.recoil * 0.2) + 0.1;
+            this.recoil -= ((this.recoil * 0.2) + 0.1) * timeScale;
             if (this.recoil < 0) this.recoil = 0;
         }
 
         // Recover squash/stretch
-        this.scaleX += (1.0 - this.scaleX) * this.squashRecovery;
-        this.scaleY += (1.0 - this.scaleY) * this.squashRecovery;
+        this.scaleX += (1.0 - this.scaleX) * this.squashRecovery * timeScale;
+        this.scaleY += (1.0 - this.scaleY) * this.squashRecovery * timeScale;
     }
 }
 
@@ -412,13 +418,14 @@ export class SoulParticle {
         this.active = true;
     }
 
-    update(createTrailCallback) {
+    update(createTrailCallback, timeScale = 1.0) {
         // Use WASM for homing physics
-        this.vx = wasmManager.calculateHomingVx(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility);
-        this.vy = wasmManager.calculateHomingVy(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility);
+        // Apply timeScale to agility
+        this.vx = wasmManager.calculateHomingVx(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility * timeScale);
+        this.vy = wasmManager.calculateHomingVy(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility * timeScale);
 
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += this.vx * timeScale;
+        this.y += this.vy * timeScale;
 
         // Visual Trail
         this.trailTimer++;
@@ -435,7 +442,7 @@ export class SoulParticle {
             return true; // Arrived
         }
 
-        this.life -= 0.005;
+        this.life -= 0.005 * timeScale;
         if (this.life <= 0) return true; // Timeout
 
         return false;
