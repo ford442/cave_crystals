@@ -80,6 +80,10 @@ export class Renderer {
             this.ctx.translate(dx, dy);
         }
 
+        if (gameState.dustParticles) {
+            this.drawDust(gameState.dustParticles);
+        }
+
         this.drawGuides();
         this.drawTargetingSystem(gameState, launcher);
 
@@ -299,6 +303,21 @@ export class Renderer {
         });
 
         this.ctx.globalCompositeOperation = 'source-over';
+    }
+
+    drawDust(particles) {
+        if (!particles) return;
+        this.ctx.save();
+        // Faint blue-ish white for dust
+        this.ctx.fillStyle = 'rgb(200, 220, 255)';
+        particles.forEach(p => {
+             // Use pre-calculated renderAlpha which includes pulse
+             this.ctx.globalAlpha = p.renderAlpha || 0.1;
+             this.ctx.beginPath();
+             this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+             this.ctx.fill();
+        });
+        this.ctx.restore();
     }
 
     drawImpactFlash(intensity, color = '#fff') {
