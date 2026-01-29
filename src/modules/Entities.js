@@ -448,3 +448,68 @@ export class SoulParticle {
         return false;
     }
 }
+
+export class DustParticle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        // Slow drift
+        this.baseVx = (Math.random() - 0.5) * 0.5;
+        this.baseVy = (Math.random() - 0.5) * 0.5;
+        this.vx = this.baseVx;
+        this.vy = this.baseVy;
+
+        this.size = Math.random() * 2 + 0.5;
+        this.alpha = Math.random() * 0.3 + 0.1;
+        this.renderAlpha = this.alpha;
+        this.phase = Math.random() * Math.PI * 2;
+    }
+
+    update(width, height, shockwaves, timeScale = 1.0) {
+        // Apply velocity
+        this.x += this.vx * timeScale;
+        this.y += this.vy * timeScale;
+
+        // Pulse alpha slightly
+        this.phase += 0.05 * timeScale;
+        const alphaPulse = 1.0 + Math.sin(this.phase) * 0.2;
+        this.renderAlpha = Math.min(1.0, Math.max(0, this.alpha * alphaPulse));
+
+        // Wrap around
+        if (this.x < 0) this.x += width;
+        if (this.x > width) this.x -= width;
+        if (this.y < 0) this.y += height;
+        if (this.y > height) this.y -= height;
+
+        // Return to base velocity (drag)
+        const drag = 0.05 * timeScale;
+        this.vx += (this.baseVx - this.vx) * drag;
+        this.vy += (this.baseVy - this.vy) * drag;
+
+        // Shockwave Interaction
+        if (shockwaves) {
+            shockwaves.forEach(sw => {
+                // Only active shockwaves
+                if (sw.life <= 0) return;
+
+                const dx = this.x - sw.x;
+                const dy = this.y - sw.y;
+                const distSq = dx*dx + dy*dy;
+                // Expanded radius for influence
+                const radius = sw.radius + 100;
+
+                if (distSq < radius * radius) {
+                    const dist = Math.sqrt(distSq);
+                    if (dist > 0) {
+                        // Push away
+                        // Force strongest near the wave front? Or just inside?
+                        // Let's just push away from center
+                        const force = (1.0 - (dist / radius)) * 2.0 * sw.life;
+                        this.vx += (dx / dist) * force * timeScale;
+                        this.vy += (dy / dist) * force * timeScale;
+                    }
+                }
+            });
+        }
+    }
+}

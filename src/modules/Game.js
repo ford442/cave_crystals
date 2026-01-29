@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle, DustParticle } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -34,6 +34,7 @@ export class Game {
             shockwaves: [],
             floatingTexts: [],
             soulParticles: [],
+            dustParticles: [],
             nextSporeColorIdx: 0,
             growthMultiplier: 1,
             shake: 0,
@@ -103,8 +104,16 @@ export class Game {
         this.state.shockwaves = [];
         this.state.floatingTexts = [];
         this.state.soulParticles = [];
+        this.state.dustParticles = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
+
+        // Spawn Atmospheric Dust
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * this.renderer.width;
+            const y = Math.random() * this.renderer.height;
+            this.state.dustParticles.push(new DustParticle(x, y));
+        }
 
         this.ui.start.classList.add('hidden');
         this.ui.gameOver.classList.add('hidden');
@@ -517,6 +526,11 @@ export class Game {
             ft.update(timeScale);
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
+
+        // Update Atmospheric Dust
+        this.state.dustParticles.forEach(p => {
+            p.update(this.renderer.width, this.renderer.height, this.state.shockwaves, timeScale);
+        });
 
         // Score lerp and UI update
         const oldDisplay = this.state.displayScore;
