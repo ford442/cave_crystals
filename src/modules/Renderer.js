@@ -635,7 +635,7 @@ export class Renderer {
             this.ctx.shadowBlur = 20 * alpha;
         }
 
-        if ((p.type === 'debris' || p.type === 'shard') && p.polyPoints) {
+        if ((p.type === 'debris' || p.type === 'shard' || p.type === 'chunk') && p.polyPoints) {
             this.ctx.beginPath();
             const s = p.size * alpha; // Scale size, not points directly to keep shape relative
             // Actually points were calculated with initial size.
@@ -653,7 +653,7 @@ export class Renderer {
 
             // Add a stroke to make it look like a rock/crystal chunk
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            this.ctx.lineWidth = 1;
+            this.ctx.lineWidth = p.type === 'chunk' ? 2 : 1;
             this.ctx.stroke();
             this.ctx.fill();
 

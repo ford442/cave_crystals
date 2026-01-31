@@ -65,7 +65,7 @@ export class Spore {
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, timeScale = 1.0) {
+    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
         if (!this.active) return;
 
         // Visual Juice: Emit trail particles
@@ -99,6 +99,8 @@ export class Spore {
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2, 'shard');
                 // JUICE: Create Heavy Debris
                 if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4);
+                // JUICE: Create Massive Severed Chunk
+                if (createChunkCallback) createChunkCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
 
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
@@ -131,6 +133,8 @@ export class Spore {
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2, 'shard');
                 // JUICE: Create Heavy Debris
                 if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4);
+                // JUICE: Create Massive Severed Chunk
+                if (createChunkCallback) createChunkCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
 
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
@@ -184,7 +188,7 @@ export class Particle {
 
         // Juice properties
         this.rotation = Math.random() * Math.PI * 2;
-        this.rotationSpeed = (Math.random() - 0.5) * ((type === 'debris' || type === 'shard') ? 0.1 : 0.2);
+        this.rotationSpeed = (Math.random() - 0.5) * ((type === 'debris' || type === 'shard' || type === 'chunk') ? 0.1 : 0.2);
 
         // 3D Rotation Juice
         this.angleX = Math.random() * Math.PI * 2;
@@ -192,14 +196,23 @@ export class Particle {
         this.velAngleX = (Math.random() - 0.5) * 0.2;
         this.velAngleY = (Math.random() - 0.5) * 0.2;
 
+        this.hitFloor = false;
+
         if (type === 'shard') {
             this.gravity = 0.8; // Heavy
             this.friction = 0.99; // Aerodynamic
+            this.floorBounce = true;
+        } else if (type === 'chunk') {
+            this.gravity = 0.9; // Very Heavy
+            this.friction = 0.99;
+            this.floorBounce = false; // No bounce, shatter
+            this.maxLife = 2.0;
+            this.size = Math.random() * 10 + 20; // Large
         } else {
             this.gravity = type === 'debris' ? 0.6 : 0.4;
             this.friction = type === 'debris' ? 0.95 : 0.98;
+            this.floorBounce = true;
         }
-        this.floorBounce = true;
 
         if (type === 'debris') {
             this.polyPoints = [];
@@ -221,6 +234,18 @@ export class Particle {
             this.polyPoints.push({ x: this.size * 0.3, y: this.size });
             // Left base
             this.polyPoints.push({ x: -this.size * 0.3, y: this.size });
+        } else if (type === 'chunk') {
+            this.polyPoints = [];
+            // Random jagged polygon
+            const numPoints = 5 + Math.floor(Math.random() * 3);
+            for(let i=0; i<numPoints; i++) {
+                const angle = (i / numPoints) * Math.PI * 2;
+                const r = this.size * (0.8 + Math.random() * 0.4);
+                this.polyPoints.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r
+                });
+            }
         }
     }
 
@@ -234,6 +259,10 @@ export class Particle {
         const adjFriction = 1 - (1 - this.friction) * timeScale;
         this.vx *= adjFriction;
         this.vy *= adjFriction;
+
+        if (this.y > rendererHeight) {
+            this.hitFloor = true;
+        }
 
         // Floor Bounce
         if (this.floorBounce && this.y > rendererHeight) {
