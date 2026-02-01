@@ -18,6 +18,7 @@ export class Crystal {
         this.scaleY = 0.0; // Start hidden for spawn animation
         this.velScaleX = 0;
         this.velScaleY = 0;
+        this.age = 0; // Animation age
 
         // Critical State Juice
         this.isCritical = false;
@@ -27,6 +28,8 @@ export class Crystal {
 
     update(growthRate, timeScale = 1.0) {
         this.height += growthRate;
+        this.age += timeScale;
+
         if(this.flash > 0) this.flash -= 0.1 * timeScale;
 
         // Handle spawn delay
@@ -35,18 +38,36 @@ export class Crystal {
             return;
         }
 
+        // Determine Target Scales for Organic Feel
+        let targetScaleX = 1.0;
+        let targetScaleY = 1.0;
+
+        if (this.isCritical) {
+            // Aggressive Throbbing (Squash and Stretch)
+            // Faster beat (multiplier 0.2 on age)
+            const pulse = Math.sin(this.age * 0.2 + this.lightPhase);
+            // Volume preservation: one expands, other contracts
+            targetScaleX = 1.0 + (pulse * 0.15); // Expand width
+            targetScaleY = 1.0 - (pulse * 0.1); // Contract height
+        } else {
+            // Gentle Breathing
+            // Slower beat (multiplier 0.05 on age)
+            const breathe = Math.sin(this.age * 0.05 + this.lightPhase);
+            targetScaleX = 1.0 + (breathe * 0.02);
+            targetScaleY = 1.0 + (breathe * 0.02); // Uniform breathing
+        }
+
         // Spring physics for scale
-        // Target is 1.0
         const k = 0.2; // Spring constant
         const d = 0.85; // Damping
 
         // Apply timeScale to spring physics
-        const fx = (1.0 - this.scaleX) * k;
+        const fx = (targetScaleX - this.scaleX) * k;
         this.velScaleX += fx * timeScale;
         this.velScaleX *= (1 - (1 - d) * timeScale);
         this.scaleX += this.velScaleX * timeScale;
 
-        const fy = (1.0 - this.scaleY) * k;
+        const fy = (targetScaleY - this.scaleY) * k;
         this.velScaleY += fy * timeScale;
         this.velScaleY *= (1 - (1 - d) * timeScale);
         this.scaleY += this.velScaleY * timeScale;
@@ -376,6 +397,9 @@ export class Launcher {
         this.tiltFactor = 0.5;
         this.recoilRecovery = 0.1;
         this.squashRecovery = 0.1;
+
+        // Juice
+        this.age = 0;
     }
 
     setTargetLane(lane) {
@@ -389,6 +413,8 @@ export class Launcher {
     }
 
     update(createTrailCallback, timeScale = 1.0) {
+        this.age += timeScale;
+
         // Lerp position
         const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
         const dx = targetX - this.x;
@@ -397,6 +423,10 @@ export class Launcher {
         const moveStep = dx * f;
         this.x += moveStep;
         this.speed = Math.abs(moveStep);
+
+        // JUICE: Hover Effect (Bobbing)
+        // Apply sine wave to Y relative to base height
+        this.y = (this.rendererHeight / 2) + Math.sin(this.age * 0.05) * 5.0;
 
         // JUICE: Speed Trail
         if (this.speed > 2.0 && createTrailCallback) {
