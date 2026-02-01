@@ -212,6 +212,15 @@ export class Game {
         }
     }
 
+    createCrystalChunk(x, y, color) {
+        // JUICE: Spawn a large chunk that falls and shatters on impact
+        const p = new Particle(x, y, color, null, null, 'chunk');
+        // Initial velocity popping off (up and out)
+        p.vx = (Math.random() - 0.5) * 4;
+        p.vy = -Math.random() * 5 - 2; // Pop UP
+        this.state.particles.push(p);
+    }
+
     createTrailParticle(x, y, color) {
         this.state.particles.push(new TrailParticle(x, y, color));
     }
@@ -471,7 +480,7 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this), timeScale);
+            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this), this.createCrystalChunk.bind(this), timeScale);
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();
@@ -490,6 +499,14 @@ export class Game {
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
             p.update(this.renderer.height, timeScale);
+
+            // JUICE: Chunk Shatter Logic
+            if (p.type === 'chunk' && p.hitFloor) {
+                // Shatter into smaller shards
+                this.createParticles(p.x, p.y, p.color, 15, -Math.PI / 2, 2.0, 'shard');
+                p.life = 0; // Destroy chunk
+            }
+
             if (p.life <= 0) this.state.particles.splice(i, 1);
         }
 
