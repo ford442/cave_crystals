@@ -80,10 +80,24 @@ export class Renderer {
             this.ctx.translate(dx, dy);
         }
 
+        if (gameState.dustParticles) {
+            this.drawDust(gameState.dustParticles);
+        }
+
         this.drawGuides();
+        this.drawTargetingSystem(gameState, launcher);
 
         // Draw Crystals with Chromatic Aberration
         gameState.crystals.forEach(c => {
+             // JUICE: Apply Shockwave Distortion
+             // Calculate center of crystal
+             const cX = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+             const cY = c.type === 'top' ? c.height / 2 : this.height - (c.height / 2);
+             const distortion = this.calculateShockwaveDistortion(cX, cY, gameState);
+
+             this.ctx.save();
+             this.ctx.translate(distortion.x, distortion.y);
+
              if (isWarping) {
                  this.ctx.globalCompositeOperation = 'screen';
                  // Red Channel Offset
@@ -101,10 +115,16 @@ export class Renderer {
                  this.ctx.globalCompositeOperation = 'source-over';
              }
              this.drawComplexCrystal(c);
+             this.ctx.restore();
         });
 
         // Draw Launcher with Chromatic Aberration (Motion Blur)
         if (launcher) {
+            // JUICE: Apply Shockwave Distortion
+            const distortion = this.calculateShockwaveDistortion(launcher.x, launcher.y, gameState);
+            this.ctx.save();
+            this.ctx.translate(distortion.x, distortion.y);
+
             if (isWarping) {
                 this.ctx.globalCompositeOperation = 'screen';
                 // Red Channel
@@ -122,6 +142,7 @@ export class Renderer {
                 this.ctx.globalCompositeOperation = 'source-over';
             }
             this.drawCursor(gameState, launcher);
+            this.ctx.restore();
         }
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => {
@@ -140,12 +161,51 @@ export class Renderer {
             gameState.floatingTexts.forEach(ft => this.drawFloatingText(ft));
         }
 
+        if (gameState.soulParticles) {
+            gameState.soulParticles.forEach(sp => this.drawSoulParticle(sp));
+        }
+
         this.ctx.restore();
+
+        // JUICE: Red Alert Vignette
+        if (gameState.criticalIntensity > 0.01) {
+            this.drawVignette(gameState.criticalIntensity);
+        }
 
         // Draw Impact Flash (independent of shake translation)
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
         }
+    }
+
+    drawVignette(intensity) {
+        if (!this.ctx) return;
+        this.ctx.save();
+
+        // Pulse alpha
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        const alpha = intensity * 0.6 * pulse; // Max 0.6 opacity
+
+        // Radial gradient from center out
+        // Use larger dimension for radius to ensure coverage
+        const radius = Math.max(this.width, this.height);
+        const grad = this.ctx.createRadialGradient(this.width / 2, this.height / 2, this.height * 0.2, this.width / 2, this.height / 2, radius * 0.8);
+        grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
+        grad.addColorStop(1, `rgba(255, 0, 0, ${alpha})`);
+
+        this.ctx.fillStyle = grad;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // Add "Danger" text if intensity is very high
+        if (intensity > 0.8 && pulse > 0.8) {
+             this.ctx.font = 'bold 60px Righteous, monospace';
+             this.ctx.fillStyle = `rgba(255, 0, 0, ${intensity})`;
+             this.ctx.textAlign = 'center';
+             this.ctx.textBaseline = 'middle';
+             this.ctx.fillText("CRITICAL!", this.width / 2, this.height * 0.3);
+        }
+
+        this.ctx.restore();
     }
 
     drawLighting(gameState, launcher) {
@@ -225,7 +285,14 @@ export class Renderer {
             drawLight(launcher.x, launcher.y, '#00FFFF', 100 + launcher.recoil * 5, 0.4);
         }
 
-        // 4. Particle Sparkles (Only large ones or groups to save perf)
+        // 4. Soul Particles Light
+        if (gameState.soulParticles) {
+             gameState.soulParticles.forEach(sp => {
+                 drawLight(sp.x, sp.y, sp.color, 40, 0.6);
+             });
+        }
+
+        // 5. Particle Sparkles (Only large ones or groups to save perf)
         // We can batch draw a faint glow for particles?
         // Or just skip for performance as there can be many.
         // Let's do a simple iterate for large particles only
@@ -236,6 +303,21 @@ export class Renderer {
         });
 
         this.ctx.globalCompositeOperation = 'source-over';
+    }
+
+    drawDust(particles) {
+        if (!particles) return;
+        this.ctx.save();
+        // Faint blue-ish white for dust
+        this.ctx.fillStyle = 'rgb(200, 220, 255)';
+        particles.forEach(p => {
+             // Use pre-calculated renderAlpha which includes pulse
+             this.ctx.globalAlpha = p.renderAlpha || 0.1;
+             this.ctx.beginPath();
+             this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+             this.ctx.fill();
+        });
+        this.ctx.restore();
     }
 
     drawImpactFlash(intensity, color = '#fff') {
@@ -260,20 +342,137 @@ export class Renderer {
         }
     }
 
+    drawTargetingSystem(gameState, launcher) {
+        if (!gameState.active || !launcher) return;
+
+        const targetLane = launcher.targetLane;
+        const targetLaneX = (targetLane * this.laneWidth) + (this.laneWidth / 2);
+
+        // Find target crystals
+        const targets = gameState.crystals.filter(c => c.lane === targetLane);
+        const nextColorIdx = gameState.nextSporeColorIdx;
+        const time = Date.now();
+
+        // Draw Laser Sight
+        // Determine "Lock Status" based on if any crystal matches
+        const hasMatch = targets.some(c => c.colorIdx === nextColorIdx);
+
+        this.ctx.save();
+
+        const beamX = targetLaneX;
+
+        if (hasMatch) {
+            // MATCH: High Energy Beam
+            const col = COLORS[nextColorIdx].hex;
+            this.ctx.strokeStyle = col;
+            this.ctx.lineWidth = 3;
+            this.ctx.shadowColor = col;
+            this.ctx.shadowBlur = 15;
+            this.ctx.setLineDash([20, 10]);
+            this.ctx.lineDashOffset = -(time / 10); // Fast flow
+        } else {
+            // NO MATCH: Searching/Scanning Beam
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            this.ctx.lineWidth = 1;
+            this.ctx.shadowBlur = 0;
+            this.ctx.setLineDash([5, 15]);
+            this.ctx.lineDashOffset = -(time / 50); // Slow flow
+        }
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(beamX, 0);
+        this.ctx.lineTo(beamX, this.height);
+        this.ctx.stroke();
+
+        this.ctx.setLineDash([]);
+
+        // Draw Reticles on Targets
+        targets.forEach(c => {
+            const isMatch = c.colorIdx === nextColorIdx;
+
+            // Calculate Crystal Tip Position
+            const cX = beamX; // Assumes crystal is centered in lane
+            // Adding shake
+            const shakeX = c.shakeX || 0;
+            const shakeY = c.shakeY || 0;
+
+            let tipY;
+             if (c.type === 'top') {
+                 tipY = c.height + shakeY;
+             } else {
+                 tipY = this.height - c.height + shakeY;
+             }
+
+             this.ctx.save();
+             this.ctx.translate(cX + shakeX, tipY);
+
+             // Reticle Animation
+             if (isMatch) {
+                 const spin = time / 100;
+                 const scale = 1.0 + Math.sin(time / 50) * 0.2;
+                 this.ctx.rotate(spin);
+                 this.ctx.scale(scale, scale);
+
+                 this.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+                 this.ctx.lineWidth = 3;
+                 this.ctx.shadowColor = COLORS[c.colorIdx].hex;
+                 this.ctx.shadowBlur = 10;
+
+                 // Draw Bracket
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, 0, Math.PI * 2); // Full ring for match
+                 this.ctx.stroke();
+
+                 // Inner crosshair
+                 this.ctx.beginPath();
+                 this.ctx.moveTo(-10, 0); this.ctx.lineTo(10, 0);
+                 this.ctx.moveTo(0, -10); this.ctx.lineTo(0, 10);
+                 this.ctx.stroke();
+
+             } else {
+                 // No match - Warning/Scanning
+                 const spin = time / 1000; // Slow spin
+                 this.ctx.rotate(spin);
+
+                 this.ctx.strokeStyle = 'rgba(255, 50, 50, 0.5)'; // Reddish warning
+                 this.ctx.lineWidth = 2;
+
+                 // Draw Broken Bracket
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, 0, Math.PI * 0.5);
+                 this.ctx.stroke();
+                 this.ctx.beginPath();
+                 this.ctx.arc(0, 0, 30, Math.PI, Math.PI * 1.5);
+                 this.ctx.stroke();
+             }
+
+             this.ctx.restore();
+
+             // Connecting Line from Launcher to Target Tip
+             // Only draw if active match or maybe always?
+             // Let's draw it faint if no match, strong if match
+             this.ctx.save();
+             this.ctx.beginPath();
+             this.ctx.moveTo(launcher.x, launcher.y); // Start at actual launcher pos
+             this.ctx.lineTo(cX + shakeX, tipY);
+
+             if (isMatch) {
+                 this.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+                 this.ctx.globalAlpha = 0.6;
+                 this.ctx.lineWidth = 2;
+             } else {
+                 this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                 this.ctx.lineWidth = 1;
+             }
+             this.ctx.stroke();
+             this.ctx.restore();
+        });
+
+        this.ctx.restore();
+    }
+
     drawCursor(gameState, launcher, colorOverride = null) {
         if(!gameState.active || !launcher) return;
-
-        // Draw Guide Line (only on main pass)
-        if (!colorOverride) {
-            const targetLaneX = (launcher.targetLane * this.laneWidth) + (this.laneWidth / 2);
-            this.ctx.beginPath();
-            this.ctx.setLineDash([5, 15]);
-            this.ctx.moveTo(targetLaneX, 0);
-            this.ctx.lineTo(targetLaneX, this.height);
-            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-        }
 
         // Draw Actual Launcher Entity (Visual Position)
         this.ctx.save();
@@ -436,15 +635,39 @@ export class Renderer {
             this.ctx.shadowBlur = 20 * alpha;
         }
 
-        this.ctx.beginPath();
-        const s = p.size * alpha; // Scale down with life
-        // Make it a diamond/shard shape
-        this.ctx.moveTo(0, -s);
-        this.ctx.lineTo(s * 0.6, 0);
-        this.ctx.lineTo(0, s);
-        this.ctx.lineTo(-s * 0.6, 0);
-        this.ctx.closePath();
-        this.ctx.fill();
+        if ((p.type === 'debris' || p.type === 'shard' || p.type === 'chunk') && p.polyPoints) {
+            this.ctx.beginPath();
+            const s = p.size * alpha; // Scale size, not points directly to keep shape relative
+            // Actually points were calculated with initial size.
+            // But we want to shrink them over time.
+            const shrink = alpha;
+
+            // Note: polyPoints are relative to (0,0)
+            if (p.polyPoints.length > 0) {
+                this.ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                for(let i=1; i<p.polyPoints.length; i++) {
+                    this.ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                }
+            }
+            this.ctx.closePath();
+
+            // Add a stroke to make it look like a rock/crystal chunk
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            this.ctx.lineWidth = p.type === 'chunk' ? 2 : 1;
+            this.ctx.stroke();
+            this.ctx.fill();
+
+        } else {
+            this.ctx.beginPath();
+            const s = p.size * alpha; // Scale down with life
+            // Make it a diamond/shard shape
+            this.ctx.moveTo(0, -s);
+            this.ctx.lineTo(s * 0.6, 0);
+            this.ctx.lineTo(0, s);
+            this.ctx.lineTo(-s * 0.6, 0);
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
 
         this.ctx.restore();
 
@@ -459,6 +682,28 @@ export class Renderer {
         this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.globalAlpha = 1.0;
+    }
+
+    drawSoulParticle(sp) {
+        this.ctx.save();
+        this.ctx.translate(sp.x, sp.y);
+
+        this.ctx.fillStyle = sp.color;
+        this.ctx.shadowBlur = 15;
+        this.ctx.shadowColor = sp.color;
+
+        // Glowing Orb
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, sp.size, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Inner white core
+        this.ctx.fillStyle = '#fff';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, sp.size * 0.4, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.restore();
     }
 
     drawFloatingText(ft) {
@@ -724,5 +969,49 @@ export class Renderer {
             g: parseInt(result[2], 16),
             b: parseInt(result[3], 16)
         } : null;
+    }
+
+    calculateShockwaveDistortion(x, y, gameState) {
+        let dx = 0;
+        let dy = 0;
+
+        if (!gameState.shockwaves) return { x: 0, y: 0 };
+
+        gameState.shockwaves.forEach(sw => {
+            // Only affect if shockwave is strong/active
+            if (sw.life <= 0) return;
+
+            const distX = x - sw.x;
+            const distY = y - sw.y;
+            const dist = Math.sqrt(distX * distX + distY * distY);
+
+            // Check if point is near the shockwave ring
+            // The ring expands. We distort things near the radius.
+            // Width of distortion band:
+            const bandWidth = 50;
+            const delta = dist - sw.radius;
+
+            if (Math.abs(delta) < bandWidth) {
+                // We are inside the distortion band
+                // Normalized position in band (-1 to 1)
+                const t = delta / bandWidth;
+
+                // Distortion curve: simple sine hump
+                // At t=0 (on the ring), distortion is max.
+                // At t=1 or -1, distortion is 0.
+                const strength = Math.cos(t * Math.PI / 2);
+
+                // Displacement force
+                // Push AWAY from center
+                const force = 15.0 * strength * sw.life; // Scale by life
+
+                if (dist > 0) {
+                    dx += (distX / dist) * force;
+                    dy += (distY / dist) * force;
+                }
+            }
+        });
+
+        return { x: dx, y: dy };
     }
 }

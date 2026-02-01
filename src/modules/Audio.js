@@ -106,5 +106,25 @@ export const SoundManager = {
         setTimeout(() => {
             this.playTone(1046.50, 'sine', 1.0, 0.1);
         }, 400);
+    },
+
+    heartbeat: function() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        // Low thud (Kick drum style)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.1);
+
+        // Short punchy envelope
+        gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.15);
     }
 };

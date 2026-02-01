@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle, DustParticle } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -33,6 +33,8 @@ export class Game {
             particles: [],
             shockwaves: [],
             floatingTexts: [],
+            soulParticles: [],
+            dustParticles: [],
             nextSporeColorIdx: 0,
             growthMultiplier: 1,
             shake: 0,
@@ -45,7 +47,12 @@ export class Game {
             combo: 0,
             comboTimer: 0,
             zoom: 1.0,
-            zoomFocus: { x: 0, y: 0 }
+            zoomFocus: { x: 0, y: 0 },
+            criticalIntensity: 0,
+            heartbeatTimer: 0,
+            timeScale: 1.0,
+            targetTimeScale: 1.0,
+            slowMoTimer: 0
         };
 
         // Initialize WASM asynchronously
@@ -86,13 +93,27 @@ export class Game {
         this.state.comboTimer = 0;
         this.state.zoom = 1.0;
         this.state.zoomFocus = { x: this.renderer.width / 2, y: this.renderer.height / 2 };
+        this.state.criticalIntensity = 0;
+        this.state.heartbeatTimer = 0;
+        this.state.timeScale = 1.0;
+        this.state.targetTimeScale = 1.0;
+        this.state.slowMoTimer = 0;
         this.state.crystals = [];
         this.state.spores = [];
         this.state.particles = [];
         this.state.shockwaves = [];
         this.state.floatingTexts = [];
+        this.state.soulParticles = [];
+        this.state.dustParticles = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
+
+        // Spawn Atmospheric Dust
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * this.renderer.width;
+            const y = Math.random() * this.renderer.height;
+            this.state.dustParticles.push(new DustParticle(x, y));
+        }
 
         this.ui.start.classList.add('hidden');
         this.ui.gameOver.classList.add('hidden');
@@ -107,8 +128,10 @@ export class Game {
 
     initCrystals() {
         for (let i = 0; i < GAME_CONFIG.lanes; i++) {
-            this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length)));
-            this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length)));
+            // JUICE: Staggered spawn delay for wave effect
+            const delay = i * 100;
+            this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
+            this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
         }
     }
 
@@ -159,15 +182,43 @@ export class Game {
         this.updateUI();
     }
 
-    createParticles(x, y, color, count = 20) {
+    createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
         const speed = 8.0;
         for(let i=0; i<count; i++) {
             // Use WASM for juicy explosion pattern
-            const vx = wasmManager.getShatterVx(i, count, speed);
-            const vy = wasmManager.getShatterVy(i, count, speed);
+            let vx, vy;
+            if (angle !== null) {
+                vx = wasmManager.getDirectionalVx(i, count, speed, angle, spread);
+                vy = wasmManager.getDirectionalVy(i, count, speed, angle, spread);
+            } else {
+                vx = wasmManager.getShatterVx(i, count, speed);
+                vy = wasmManager.getShatterVy(i, count, speed);
+            }
 
-            this.state.particles.push(new Particle(x, y, color, vx, vy));
+            this.state.particles.push(new Particle(x, y, color, vx, vy, type));
         }
+    }
+
+    createDebris(x, y, color, count = 4) {
+        for(let i=0; i<count; i++) {
+             // Debris flies out randomly but generally away from center if we knew it
+             // Here we just explode them
+             const angle = Math.random() * Math.PI * 2;
+             const speed = Math.random() * 5 + 3;
+             const vx = Math.cos(angle) * speed;
+             const vy = Math.sin(angle) * speed;
+
+             this.state.particles.push(new Particle(x, y, color, vx, vy, 'debris'));
+        }
+    }
+
+    createCrystalChunk(x, y, color) {
+        // JUICE: Spawn a large chunk that falls and shatters on impact
+        const p = new Particle(x, y, color, null, null, 'chunk');
+        // Initial velocity popping off (up and out)
+        p.vx = (Math.random() - 0.5) * 4;
+        p.vy = -Math.random() * 5 - 2; // Pop UP
+        this.state.particles.push(p);
     }
 
     createTrailParticle(x, y, color) {
@@ -208,6 +259,10 @@ export class Game {
     triggerLevelUp() {
         SoundManager.levelUp();
 
+        // Time Dilation (Slow Motion)
+        this.state.targetTimeScale = 0.05;
+        this.state.slowMoTimer = 2000;
+
         // Massive Shake
         this.state.shake = 30;
 
@@ -237,7 +292,18 @@ export class Game {
     }
 
     update(dt) {
-        // Shake decay
+        // Time Dilation Logic
+        if (this.state.slowMoTimer > 0) {
+            this.state.slowMoTimer -= dt;
+            this.state.timeScale += (this.state.targetTimeScale - this.state.timeScale) * 0.2;
+        } else {
+            this.state.timeScale += (1.0 - this.state.timeScale) * 0.2;
+            if (Math.abs(1.0 - this.state.timeScale) < 0.01) this.state.timeScale = 1.0;
+        }
+        const timeScale = this.state.timeScale;
+
+        // Shake decay (affected by timeScale?) - No, shake is visual and should probably remain snappy or maybe decay slower?
+        // Let's keep shake decay independent of timeScale for visceral feel
         if (this.state.shake > 0) {
             this.state.shake *= 0.9;
             if (this.state.shake < 0.5) this.state.shake = 0;
@@ -255,9 +321,9 @@ export class Game {
             if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
-        // Combo Timer decay
+        // Combo Timer decay (Game time)
         if (this.state.comboTimer > 0) {
-            this.state.comboTimer -= dt;
+            this.state.comboTimer -= dt * timeScale;
             if (this.state.comboTimer <= 0) {
                 this.state.combo = 0;
             }
@@ -269,19 +335,14 @@ export class Game {
             if (this.state.zoom < 1.001) this.state.zoom = 1.0;
         }
 
-        // Score lerp
-        this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
-        if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
-            this.state.displayScore = this.state.score;
-        }
-
         this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);
-        const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier);
+        const currentGrowth = wasmManager.calculateCrystalGrowth(GAME_CONFIG.baseGrowthRate, this.state.growthMultiplier) * timeScale;
 
         let gameOver = false;
+        let maxCritical = 0;
 
         this.state.crystals.forEach(c => {
-            c.update(currentGrowth);
+            c.update(currentGrowth, timeScale);
 
             // JUICE: Critical Mass System
             // Reset shake
@@ -300,8 +361,14 @@ export class Game {
                     c.shakeX = (Math.random() - 0.5) * 4;
                     c.shakeY = (Math.random() - 0.5) * 4;
 
+                    // Calculate intensity (0.0 to 1.0)
+                    const over = totalHeight - dangerThreshold;
+                    const range = this.renderer.height * 0.25;
+                    const intensity = Math.min(1.0, over / range);
+                    if (intensity > maxCritical) maxCritical = intensity;
+
                     // Emit smoke particles occasionally
-                    if (Math.random() < 0.1) {
+                    if (Math.random() < 0.1 * timeScale) {
                          const x = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + c.shakeX;
                          const tipY = c.type === 'top' ? c.height : this.renderer.height - c.height;
 
@@ -320,6 +387,18 @@ export class Game {
             }
         });
 
+        // JUICE: Update Critical Intensity & Heartbeat
+        this.state.criticalIntensity += (maxCritical - this.state.criticalIntensity) * 0.1;
+
+        if (this.state.criticalIntensity > 0.1) {
+             this.state.heartbeatTimer -= dt;
+             if (this.state.heartbeatTimer <= 0) {
+                 SoundManager.heartbeat();
+                 // Faster beat as intensity increases (1000ms down to 300ms)
+                 this.state.heartbeatTimer = 1000 - (this.state.criticalIntensity * 700);
+             }
+        }
+
         if (gameOver) {
             this.state.active = false;
             this.shatterAllCrystals();
@@ -337,19 +416,29 @@ export class Game {
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
             s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y, color) => {
-                this.state.score += points;
-
-                // Level Up Check
-                const newLevel = Math.floor(this.state.score / 500) + 1;
-                if (newLevel > this.state.level) {
-                    this.state.level = newLevel;
-                    this.triggerLevelUp();
-                }
 
                 if (isMatch) {
+                    // Spawn Soul Particles for Collection Juice
+                    const soulCount = 3 + Math.floor(Math.random() * 2);
+                    // Target top-left score area
+                    const tx = 60;
+                    const ty = 60;
+
+                    for(let k=0; k<soulCount; k++) {
+                        let val = Math.floor(points / soulCount);
+                        if (k === 0) val += points % soulCount;
+                        this.state.soulParticles.push(new SoulParticle(x, y, color, tx, ty, val));
+                    }
+
                     // JUICE: Combo Logic
                     this.state.combo++;
                     this.state.comboTimer = 2000; // 2 seconds to keep combo
+
+                    // Time Dilation on High Combo
+                    if (this.state.combo > 2) {
+                        this.state.targetTimeScale = 0.3;
+                        this.state.slowMoTimer = 400; // Short burst of slow-mo
+                    }
 
                     // Pitch Shift
                     const pitch = 1.0 + (Math.min(this.state.combo, 10) * 0.1);
@@ -391,45 +480,98 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this));
+            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this), this.createCrystalChunk.bind(this), timeScale);
             if (!s.active) {
                 this.state.spores.splice(i, 1);
                 this.updateUI();
             }
         }
 
+        // Pass trail callback for juice
+        this.launcher.update(this.createTrailParticle.bind(this), timeScale);
+
+        // Shared visual updates (including Soul Particles and Score Lerp)
+        this.updateSharedVisuals(dt, timeScale);
+    }
+
+    updateSharedVisuals(dt, timeScale = 1.0) {
         // Update Particles
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
-            p.update(this.renderer.height);
+            p.update(this.renderer.height, timeScale);
+
+            // JUICE: Chunk Shatter Logic
+            if (p.type === 'chunk' && p.hitFloor) {
+                // Shatter into smaller shards
+                this.createParticles(p.x, p.y, p.color, 15, -Math.PI / 2, 2.0, 'shard');
+                p.life = 0; // Destroy chunk
+            }
+
             if (p.life <= 0) this.state.particles.splice(i, 1);
         }
 
         // Update Shockwaves
         for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
             let sw = this.state.shockwaves[i];
-            sw.update();
+            sw.update(timeScale);
             if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
+        }
+
+        // Update Soul Particles
+        for (let i = this.state.soulParticles.length - 1; i >= 0; i--) {
+            let sp = this.state.soulParticles[i];
+            const arrived = sp.update(this.createTrailParticle.bind(this), timeScale);
+
+            if (arrived) {
+                if (sp.scoreValue > 0) {
+                    this.state.score += sp.scoreValue;
+
+                    // Level Up Check
+                    const newLevel = Math.floor(this.state.score / 500) + 1;
+                    if (newLevel > this.state.level) {
+                        this.state.level = newLevel;
+                        this.triggerLevelUp();
+                    }
+                }
+                this.state.soulParticles.splice(i, 1);
+            }
         }
 
         // Update Floating Texts
         for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
             let ft = this.state.floatingTexts[i];
-            ft.update();
+            ft.update(timeScale);
             if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
         }
 
-        // Pass trail callback for juice
-        this.launcher.update(this.createTrailParticle.bind(this));
+        // Update Atmospheric Dust
+        this.state.dustParticles.forEach(p => {
+            p.update(this.renderer.width, this.renderer.height, this.state.shockwaves, timeScale);
+        });
+
+        // Score lerp and UI update
+        const oldDisplay = this.state.displayScore;
+        this.state.displayScore += (this.state.score - this.state.displayScore) * 0.1;
+        if (Math.abs(this.state.score - this.state.displayScore) < 0.5) {
+            this.state.displayScore = this.state.score;
+        }
+
+        // Only update DOM if score changed significantly (counting up effect)
+        if (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore)) {
+             this.ui.score.innerText = Math.floor(this.state.displayScore);
+             // Pulse effect on every tick of increase
+             const scale = 1.0 + (this.state.shake * 0.01) + 0.1;
+             this.ui.score.style.transform = `scale(${scale})`;
+        } else {
+             // Passive pulse from shake
+             const scale = 1.0 + (this.state.shake * 0.01);
+             this.ui.score.style.transform = `scale(${scale})`;
+        }
     }
 
     updateUI() {
         this.ui.score.innerText = Math.floor(this.state.displayScore);
         this.ui.level.innerText = Math.floor(this.state.score / 500) + 1;
-
-        // Scale pulse effect on score if recently changed
-        const scale = 1.0 + (this.state.shake * 0.01);
-        this.ui.score.style.transform = `scale(${scale})`;
 
         const nextCol = COLORS[this.state.nextSporeColorIdx];
         this.ui.preview.style.backgroundColor = nextCol.hex;
@@ -468,9 +610,13 @@ export class Game {
 
     shatterAllCrystals() {
         // JUICE: Massive explosion of all crystals
+        this.state.targetTimeScale = 0.1;
+        this.state.slowMoTimer = 3000;
+
         this.state.shake = 60; // Huge shake
         this.state.impactFlash = 1.0; // Full white flash
         this.state.impactFlashColor = '#fff';
+        this.state.criticalIntensity = 0; // Stop red alert
 
         this.state.crystals.forEach(c => {
             // Calculate center of crystal for explosion origin
@@ -486,7 +632,7 @@ export class Game {
             // Spawn many particles
             // Use crystal color
             const color = COLORS[c.colorIdx].hex;
-            this.createParticles(x, y, color, 30); // 30 particles per crystal
+            this.createParticles(x, y, color, 30, null, 1.5, 'shard'); // 30 shards per crystal
             this.createShockwave(x, y, color);
         });
 
@@ -507,25 +653,6 @@ export class Game {
             if (this.state.impactFlash < 0) this.state.impactFlash = 0;
         }
 
-        // Update Particles
-        for (let i = this.state.particles.length - 1; i >= 0; i--) {
-            let p = this.state.particles[i];
-            p.update(this.renderer.height);
-            if (p.life <= 0) this.state.particles.splice(i, 1);
-        }
-
-        // Update Shockwaves
-        for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
-            let sw = this.state.shockwaves[i];
-            sw.update();
-            if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
-        }
-
-        // Update Floating Texts
-        for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
-            let ft = this.state.floatingTexts[i];
-            ft.update();
-            if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
-        }
+        this.updateSharedVisuals(dt);
     }
 }

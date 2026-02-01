@@ -1,4 +1,5 @@
 // Particle system module optimized for WebAssembly
+import { fastRandom } from "./math";
 
 /**
  * Update a single particle's position and life
@@ -47,7 +48,7 @@ export function isParticleAlive(life: f64): bool {
 /**
  * Batch process multiple particles
  * This is optimized for processing many particles at once
- * Currently a placeholder for future batch optimization
+ * Currently a placeholder for future optimization
  */
 export function batchUpdateParticles(
     count: i32,
@@ -64,7 +65,7 @@ export function batchUpdateParticles(
  */
 export function getShatterVx(index: i32, total: i32, force: f64): f64 {
     const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
-    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.5;
     return Math.cos(angle) * force + randomVariation;
 }
 
@@ -74,8 +75,31 @@ export function getShatterVx(index: i32, total: i32, force: f64): f64 {
  */
 export function getShatterVy(index: i32, total: i32, force: f64): f64 {
     const angle: f64 = (f64(index) / f64(total)) * 6.28318530718; // 2 * PI
-    const randomVariation: f64 = (Math.random() - 0.5) * 0.5;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.5;
     return Math.sin(angle) * force + randomVariation;
+}
+
+/**
+ * Calculate X velocity for a directional burst particle
+ * Distributes particles in a cone
+ */
+export function getDirectionalVx(index: i32, total: i32, force: f64, angle: f64, spread: f64): f64 {
+    const fraction: f64 = f64(index) / f64(total);
+    // Map fraction 0..1 to -spread/2 .. +spread/2
+    const offset: f64 = (fraction - 0.5) * spread;
+    const finalAngle: f64 = angle + offset + (fastRandom() - 0.5) * 0.2;
+    return Math.cos(finalAngle) * force;
+}
+
+/**
+ * Calculate Y velocity for a directional burst particle
+ * Distributes particles in a cone
+ */
+export function getDirectionalVy(index: i32, total: i32, force: f64, angle: f64, spread: f64): f64 {
+    const fraction: f64 = f64(index) / f64(total);
+    const offset: f64 = (fraction - 0.5) * spread;
+    const finalAngle: f64 = angle + offset + (fastRandom() - 0.5) * 0.2;
+    return Math.sin(finalAngle) * force;
 }
 
 /**
@@ -97,4 +121,39 @@ export function getSmokeVx(random: f64): f64 {
  */
 export function getSmokeVy(random: f64): f64 {
     return -(random * 2.0 + 1.0);
+}
+
+/**
+ * Calculate X velocity for homing particle (steering towards target)
+ * Uses steering behavior: Steering = Desired - Velocity
+ */
+export function calculateHomingVx(currVx: f64, currVy: f64, x: f64, y: f64, tx: f64, ty: f64, speed: f64, agility: f64): f64 {
+    const dx: f64 = tx - x;
+    const dy: f64 = ty - y;
+    const dist: f64 = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 1.0) return currVx;
+
+    // Desired velocity
+    const desiredVx: f64 = (dx / dist) * speed;
+
+    // Lerp current to desired
+    return currVx + (desiredVx - currVx) * agility;
+}
+
+/**
+ * Calculate Y velocity for homing particle (steering towards target)
+ */
+export function calculateHomingVy(currVx: f64, currVy: f64, x: f64, y: f64, tx: f64, ty: f64, speed: f64, agility: f64): f64 {
+    const dx: f64 = tx - x;
+    const dy: f64 = ty - y;
+    const dist: f64 = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 1.0) return currVy;
+
+    // Desired velocity
+    const desiredVy: f64 = (dy / dist) * speed;
+
+    // Lerp current to desired
+    return currVy + (desiredVy - currVy) * agility;
 }
