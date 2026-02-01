@@ -84,7 +84,7 @@ export class Renderer {
             this.drawDust(gameState.dustParticles);
         }
 
-        this.drawGuides();
+        this.drawHoloGrid(gameState, launcher);
         this.drawTargetingSystem(gameState, launcher);
 
         // Draw Crystals with Chromatic Aberration
@@ -330,16 +330,99 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawGuides() {
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    drawHoloGrid(gameState, launcher) {
+        // JUICE: Dynamic Holographic Grid
+        const gridSize = 50; // Cell size
+        const time = Date.now();
+        const pulse = Math.sin(time / 1000) * 0.5 + 0.5; // Slow heartbeat pulse
+
+        // Setup base grid style
         this.ctx.lineWidth = 1;
-        for(let i=1; i<GAME_CONFIG.lanes; i++) {
-            const x = i * this.laneWidth;
-            this.ctx.beginPath();
-            this.ctx.moveTo(x, 0);
-            this.ctx.lineTo(x, this.height);
-            this.ctx.stroke();
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+
+        // Active Lane Glow
+        const activeLane = launcher ? launcher.targetLane : -1;
+        const activeX = (activeLane * this.laneWidth) + (this.laneWidth / 2);
+
+        this.ctx.save();
+
+        // Horizontal Lines
+        for (let y = 0; y <= this.height; y += gridSize) {
+             this.ctx.beginPath();
+             // Draw line segments so they can curve
+             let start = true;
+             for (let x = 0; x <= this.width; x += gridSize) {
+                 // Calculate distortion at this vertex
+                 const dist = this.calculateShockwaveDistortion(x, y, gameState);
+
+                 // Apply heartbeat breathe
+                 // Center breathe: expand from center
+                 const cx = this.width / 2;
+                 const cy = this.height / 2;
+                 const dx = x - cx;
+                 const dy = y - cy;
+                 const breatheX = dx * 0.01 * pulse;
+                 const breatheY = dy * 0.01 * pulse;
+
+                 const finalX = x + dist.x + breatheX;
+                 const finalY = y + dist.y + breatheY;
+
+                 if (start) {
+                     this.ctx.moveTo(finalX, finalY);
+                     start = false;
+                 } else {
+                     this.ctx.lineTo(finalX, finalY);
+                 }
+             }
+             this.ctx.stroke();
         }
+
+        // Vertical Lines
+        for (let x = 0; x <= this.width; x += gridSize) {
+             // Check if this vertical line is near active lane
+             const distToActive = Math.abs(x - activeX);
+             let isNearActive = false;
+             if (activeLane >= 0 && distToActive < this.laneWidth / 2) {
+                 isNearActive = true;
+             }
+
+             if (isNearActive) {
+                 this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.1 + (pulse * 0.1)})`; // Cyan glow
+                 this.ctx.lineWidth = 2;
+                 this.ctx.shadowColor = 'cyan';
+                 this.ctx.shadowBlur = 5;
+             } else {
+                 this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+                 this.ctx.lineWidth = 1;
+                 this.ctx.shadowBlur = 0;
+             }
+
+             this.ctx.beginPath();
+             let start = true;
+             for (let y = 0; y <= this.height; y += gridSize) {
+                 const dist = this.calculateShockwaveDistortion(x, y, gameState);
+
+                 const cx = this.width / 2;
+                 const cy = this.height / 2;
+                 const dx = x - cx;
+                 const dy = y - cy;
+                 const breatheX = dx * 0.01 * pulse;
+                 const breatheY = dy * 0.01 * pulse;
+
+                 const finalX = x + dist.x + breatheX;
+                 const finalY = y + dist.y + breatheY;
+
+                 if (start) {
+                     this.ctx.moveTo(finalX, finalY);
+                     start = false;
+                 } else {
+                     this.ctx.lineTo(finalX, finalY);
+                 }
+             }
+             this.ctx.stroke();
+        }
+
+        this.ctx.restore();
     }
 
     drawTargetingSystem(gameState, launcher) {
