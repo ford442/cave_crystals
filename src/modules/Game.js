@@ -182,8 +182,13 @@ export class Game {
         this.updateUI();
     }
 
+    createImpactDust(x, y, color) {
+        // Tiny short lived particles
+        this.createParticles(x, y, color, 3, -Math.PI/2, 2.0, 'spark');
+    }
+
     createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
-        const speed = 8.0;
+        const speed = type === 'spark' && count < 5 ? 2.0 : 8.0; // Slower for dust
         for(let i=0; i<count; i++) {
             // Use WASM for juicy explosion pattern
             let vx, vy;
@@ -498,12 +503,25 @@ export class Game {
         // Update Particles
         for (let i = this.state.particles.length - 1; i >= 0; i--) {
             let p = this.state.particles[i];
-            p.update(this.renderer.height, timeScale);
+
+            // Pass width and callback for wall bouncing juice
+            p.update(
+                this.renderer.width,
+                this.renderer.height,
+                this.createImpactDust.bind(this),
+                timeScale
+            );
 
             // JUICE: Chunk Shatter Logic
-            if (p.type === 'chunk' && p.hitFloor) {
+            if (p.type === 'chunk' && (p.hitFloor || p.hitWall)) {
                 // Shatter into smaller shards
-                this.createParticles(p.x, p.y, p.color, 15, -Math.PI / 2, 2.0, 'shard');
+                // If wall hit, shatter inward
+                let angle = -Math.PI / 2; // Up (floor hit)
+                if (p.hitWall) {
+                    angle = p.x < 100 ? 0 : Math.PI; // Inward
+                }
+
+                this.createParticles(p.x, p.y, p.color, 15, angle, 2.0, 'shard');
                 p.life = 0; // Destroy chunk
             }
 

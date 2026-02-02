@@ -270,7 +270,7 @@ export class Particle {
         }
     }
 
-    update(rendererHeight = 800, timeScale = 1.0) {
+    update(rendererWidth, rendererHeight, onBounceCallback, timeScale = 1.0) {
         // Apply physics
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
@@ -280,6 +280,31 @@ export class Particle {
         const adjFriction = 1 - (1 - this.friction) * timeScale;
         this.vx *= adjFriction;
         this.vy *= adjFriction;
+
+        // Angular drag to let them settle
+        this.rotationSpeed *= (1 - 0.01 * timeScale);
+
+        const isPhysical = this.type === 'shard' || this.type === 'debris' || this.type === 'chunk';
+
+        // Wall Collisions
+        if (isPhysical) {
+            let bounced = false;
+            if (this.x < 0) {
+                this.x = 0;
+                this.vx *= -0.6; // Wall bounce damping
+                this.hitWall = true;
+                bounced = true;
+            } else if (this.x > rendererWidth) {
+                this.x = rendererWidth;
+                this.vx *= -0.6;
+                this.hitWall = true;
+                bounced = true;
+            }
+
+            if (bounced && onBounceCallback && (Math.abs(this.vx) > 2 || Math.abs(this.vy) > 2)) {
+                onBounceCallback(this.x, this.y, this.color);
+            }
+        }
 
         if (this.y > rendererHeight) {
             this.hitFloor = true;
@@ -291,6 +316,11 @@ export class Particle {
             // Use WASM for bounce calc if we wanted, but calling JS -> WASM for simple float math is overkill
             // so we stick to the JS logic calling the WASM helper if available, or direct logic.
             // Using the exposed method for prompt compliance:
+            // Check impact speed for dust
+            if (onBounceCallback && Math.abs(this.vy) > 3) {
+                 onBounceCallback(this.x, this.y, this.color);
+            }
+
             this.vy = wasmManager.getBounceVy(this.vy, 0.6);
 
             // Randomize X slightly on bounce
