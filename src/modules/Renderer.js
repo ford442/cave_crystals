@@ -561,7 +561,14 @@ export class Renderer {
         this.ctx.save();
         this.ctx.translate(launcher.x, launcher.y);
         this.ctx.rotate(launcher.tilt);
-        this.ctx.scale(launcher.scaleX, launcher.scaleY);
+
+        // JUICE: Velocity-based Squash & Stretch
+        // Stretch in X (direction of movement), Squash in Y
+        // launcher.scaleX/Y handles the firing recoil squash
+        const speedSquash = Math.min(0.3, (launcher.speed || 0) * 0.02);
+        const sx = launcher.scaleX + speedSquash;
+        const sy = launcher.scaleY - (speedSquash * 0.5);
+        this.ctx.scale(sx, sy);
 
         this.ctx.translate(0, launcher.recoil);
 
@@ -618,21 +625,12 @@ export class Renderer {
 
     drawSpore(s) {
         const col = COLORS[s.colorIdx];
-
-        // Elastic Spawn Animation
-        // Determine "visual" radius vs logical radius
-        // Logical radius is s.radius
-        // We want a bounce effect.
-        // Assume spore expands linearly in logic.
-        // We add a wobble based on time.
-
-        const time = Date.now() / 100;
-        const wobble = Math.sin(time * 20) * 2; // High frequency wobble
+        const time = Date.now();
 
         // Elastic spawn scale
         let scale = 1.0;
         if (s.spawnTime) {
-            const age = (Date.now() - s.spawnTime) / 500; // 0.5s duration
+            const age = (time - s.spawnTime) / 500; // 0.5s duration
             if (age < 1.0) {
                 // Elastic ease out
                 const c4 = (2 * Math.PI) / 3;
@@ -640,29 +638,77 @@ export class Renderer {
             }
         }
 
-        const visualRadius = (s.radius + wobble) * scale;
+        const baseRadius = s.radius * scale;
 
-        // Glow
-        this.ctx.shadowBlur = 30;
+        this.ctx.save();
+        this.ctx.translate(s.x, s.y);
+
+        // JUICE: Plasma Core - Rotating Star
+        const spin = time / 200;
+        this.ctx.rotate(spin);
+
+        this.ctx.shadowBlur = 20;
         this.ctx.shadowColor = col.hex;
+        this.ctx.fillStyle = '#fff';
 
-        // Main body
-        const grad = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, visualRadius);
+        // Draw Core (4-pointed Star shape)
+        const coreSize = baseRadius * 0.8;
+        const innerSize = coreSize * 0.3;
+        const spikes = 4;
+
+        this.ctx.beginPath();
+        for (let i = 0; i < spikes * 2; i++) {
+            const r = (i % 2 === 0) ? coreSize : innerSize;
+            const a = (i * Math.PI) / spikes;
+            this.ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // Outer Glow/Halo
+        // Rotate opposite for halo
+        this.ctx.rotate(-spin * 2);
+        const grad = this.ctx.createRadialGradient(0, 0, baseRadius * 0.5, 0, 0, baseRadius * 1.8);
         grad.addColorStop(0, '#fff');
-        grad.addColorStop(0.3, col.hex);
+        grad.addColorStop(0.2, col.hex);
         grad.addColorStop(1, 'transparent');
-
         this.ctx.fillStyle = grad;
         this.ctx.beginPath();
-        this.ctx.arc(s.x, s.y, visualRadius, 0, Math.PI*2);
+        this.ctx.arc(0, 0, baseRadius * 2.0, 0, Math.PI * 2);
         this.ctx.fill();
 
-        // Core
-        this.ctx.beginPath();
-        this.ctx.arc(s.x, s.y, visualRadius * 0.4, 0, Math.PI*2);
-        this.ctx.fillStyle = '#fff';
-        this.ctx.fill();
+        // JUICE: Lightning Arcs
+        // Randomly generate arcs
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.lineWidth = 2;
+        this.ctx.lineCap = 'round';
+        this.ctx.shadowBlur = 10;
+        this.ctx.shadowColor = '#fff';
 
+        // Chaotic lightning
+        const numArcs = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < numArcs; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const len = baseRadius * (1.5 + Math.random() * 0.8);
+
+            this.ctx.save();
+            this.ctx.rotate(angle);
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, 0);
+
+            // Jagged line
+            let r = baseRadius * 0.5;
+            const step = len / 4;
+            while(r < len) {
+                r += step;
+                const offset = (Math.random() - 0.5) * (baseRadius * 0.8);
+                this.ctx.lineTo(r, offset);
+            }
+            this.ctx.stroke();
+            this.ctx.restore();
+        }
+
+        this.ctx.restore();
         this.ctx.shadowBlur = 0;
     }
 
