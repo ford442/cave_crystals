@@ -167,6 +167,14 @@ export class Renderer {
 
         this.ctx.restore();
 
+        // JUICE: Holographic Glitch & Scanlines
+        if (gameState.criticalIntensity > 0.01) {
+             this.drawScanlines(gameState.criticalIntensity);
+             if (gameState.criticalIntensity > 0.2) {
+                 this.drawGlitch(gameState.criticalIntensity);
+             }
+        }
+
         // JUICE: Red Alert Vignette
         if (gameState.criticalIntensity > 0.01) {
             this.drawVignette(gameState.criticalIntensity);
@@ -1098,6 +1106,38 @@ export class Renderer {
             g: parseInt(result[2], 16),
             b: parseInt(result[3], 16)
         } : null;
+    }
+
+    drawScanlines(intensity) {
+        if (!this.ctx) return;
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'source-over';
+        // Scanlines opacity scales with intensity but stays subtle
+        this.ctx.fillStyle = `rgba(0, 0, 0, ${intensity * 0.3})`;
+        for (let y = 0; y < this.height; y += 4) {
+            this.ctx.fillRect(0, y, this.width, 2);
+        }
+        this.ctx.restore();
+    }
+
+    drawGlitch(intensity) {
+        if (!this.ctx) return;
+        // Number of glitches scales with intensity
+        const numGlitches = Math.floor(intensity * 10);
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'exclusion'; // Inverts colors for "digital corruption" look
+
+        for (let i = 0; i < numGlitches; i++) {
+            const x = Math.random() * this.width;
+            const y = Math.random() * this.height;
+            const w = Math.random() * 200 + 50;
+            const h = Math.random() * 30 + 5;
+
+            // Randomly choose cyan or magenta for that chromatic aberration feel
+            this.ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0, 255, 255, 0.5)' : 'rgba(255, 0, 255, 0.5)';
+            this.ctx.fillRect(x, y, w, h);
+        }
+        this.ctx.restore();
     }
 
     calculateShockwaveDistortion(x, y, gameState) {
