@@ -238,6 +238,18 @@ export class Game {
         this.state.floatingTexts.push(new FloatingText(x, y, text, color, scale));
     }
 
+    triggerResonance(hexColor) {
+        this.state.crystals.forEach(c => {
+             const cHex = COLORS[c.colorIdx].hex;
+             if (cHex === hexColor) {
+                 // Resonance Pulse
+                 c.velScaleY += 0.5; // Jump up
+                 c.velScaleX -= 0.1; // Squash in slightly
+                 c.flash = 0.8;
+             }
+        });
+    }
+
     calculateShake() {
         // JUICE: Apply Recoil Kick
         const kick = this.state.kickY || 0;
@@ -428,6 +440,9 @@ export class Game {
                     // Target top-left score area
                     const tx = 60;
                     const ty = 60;
+
+                    // JUICE: Sympathetic Resonance
+                    this.triggerResonance(color);
 
                     for(let k=0; k<soulCount; k++) {
                         let val = Math.floor(points / soulCount);
