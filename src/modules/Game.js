@@ -204,25 +204,31 @@ export class Game {
         }
     }
 
-    createDebris(x, y, color, count = 4) {
+    createDebris(x, y, color, count = 4, angle = null, spread = 1.0) {
         for(let i=0; i<count; i++) {
-             // Debris flies out randomly but generally away from center if we knew it
-             // Here we just explode them
-             const angle = Math.random() * Math.PI * 2;
+             let vx, vy;
              const speed = Math.random() * 5 + 3;
-             const vx = Math.cos(angle) * speed;
-             const vy = Math.sin(angle) * speed;
+
+             if (angle !== null) {
+                 vx = wasmManager.getDirectionalVx(i, count, speed, angle, spread);
+                 vy = wasmManager.getDirectionalVy(i, count, speed, angle, spread);
+             } else {
+                 // Debris flies out randomly if no angle
+                 const rndAngle = Math.random() * Math.PI * 2;
+                 vx = Math.cos(rndAngle) * speed;
+                 vy = Math.sin(rndAngle) * speed;
+             }
 
              this.state.particles.push(new Particle(x, y, color, vx, vy, 'debris'));
         }
     }
 
-    createCrystalChunk(x, y, color) {
+    createCrystalChunk(x, y, color, dirY = -1) {
         // JUICE: Spawn a large chunk that falls and shatters on impact
         const p = new Particle(x, y, color, null, null, 'chunk');
-        // Initial velocity popping off (up and out)
+        // Initial velocity popping off (up and out or down and out)
         p.vx = (Math.random() - 0.5) * 4;
-        p.vy = -Math.random() * 5 - 2; // Pop UP
+        p.vy = (Math.random() * 5 + 2) * dirY;
         this.state.particles.push(p);
     }
 

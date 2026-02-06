@@ -118,10 +118,10 @@ export class Spore {
 
                 // Create particles at impact point (Spray DOWN)
                 createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2, 'shard');
-                // JUICE: Create Heavy Debris
-                if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4);
-                // JUICE: Create Massive Severed Chunk
-                if (createChunkCallback) createChunkCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
+                // JUICE: Create Heavy Debris (Spray DOWN)
+                if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4, Math.PI / 2);
+                // JUICE: Create Massive Severed Chunk (Fall DOWN)
+                if (createChunkCallback) createChunkCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 1);
 
                 if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
@@ -152,10 +152,10 @@ export class Spore {
 
                 // Create particles at impact point (Spray UP)
                 createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2, 'shard');
-                // JUICE: Create Heavy Debris
-                if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4);
-                // JUICE: Create Massive Severed Chunk
-                if (createChunkCallback) createChunkCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
+                // JUICE: Create Heavy Debris (Spray UP)
+                if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4, -Math.PI / 2);
+                // JUICE: Create Massive Severed Chunk (Fly UP)
+                if (createChunkCallback) createChunkCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, -1);
 
                 if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
                 scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
