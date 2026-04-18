@@ -24,6 +24,18 @@ export class Crystal {
         this.isCritical = false;
         this.shakeX = 0;
         this.shakeY = 0;
+
+        // Cache shard config index to avoid per-frame lookup in renderer
+        this.shardConfigIndex = this._getShardConfigIndex();
+    }
+
+    _getShardConfigIndex() {
+        const seed = this.shapeSeed;
+        if (seed < 0.2) return 0;
+        if (seed < 0.4) return 1;
+        if (seed < 0.6) return 2;
+        if (seed < 0.8) return 3;
+        return 4;
     }
 
     update(growthRate, timeScale = 1.0) {
@@ -86,7 +98,7 @@ export class Spore {
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
     }
 
-    update(crystals, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
+    update(topCry, botCry, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
         if (!this.active) return;
 
         // Visual Juice: Emit trail particles
@@ -95,9 +107,6 @@ export class Spore {
         }
 
         this.radius += GAME_CONFIG.sporeExpandRate * timeScale;
-
-        const topCry = crystals.find(c => c.lane === this.lane && c.type === 'top');
-        const botCry = crystals.find(c => c.lane === this.lane && c.type === 'bottom');
 
         if (!topCry || !botCry) return;
 
@@ -182,6 +191,10 @@ export class Spore {
 
 export class Particle {
     constructor(x, y, color, vx = null, vy = null, type = 'spark') {
+        this._init(x, y, color, vx, vy, type);
+    }
+
+    _init(x, y, color, vx = null, vy = null, type = 'spark') {
         this.x = x;
         this.y = y;
         this.type = type;
@@ -218,6 +231,7 @@ export class Particle {
         this.velAngleY = (Math.random() - 0.5) * 0.2;
 
         this.hitFloor = false;
+        this.hitWall = false;
 
         if (type === 'shard') {
             this.gravity = 0.8; // Heavy
@@ -268,6 +282,10 @@ export class Particle {
                 });
             }
         }
+    }
+
+    reset(x, y, color, vx = null, vy = null, type = 'spark') {
+        this._init(x, y, color, vx, vy, type);
     }
 
     update(rendererWidth, rendererHeight, onBounceCallback, timeScale = 1.0) {
@@ -342,6 +360,10 @@ export class Particle {
 
 export class TrailParticle {
     constructor(x, y, color) {
+        this._init(x, y, color);
+    }
+
+    _init(x, y, color) {
         this.x = x;
         this.y = y;
         this.color = color;
@@ -353,11 +375,42 @@ export class TrailParticle {
         this.vy = (Math.random() - 0.5) * 0.5;
     }
 
+    reset(x, y, color) {
+        this._init(x, y, color);
+    }
+
     update(timeScale = 1.0) {
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
         this.life -= 0.05 * timeScale; // Fade fast
         this.size *= (1 - 0.1 * timeScale); // Shrink
+    }
+}
+
+export class ParticlePool {
+    constructor(createFn, resetFn, initialSize = 50) {
+        this.createFn = createFn;
+        this.resetFn = resetFn;
+        this.available = [];
+        this.inUse = [];
+        for (let i = 0; i < initialSize; i++) {
+            this.available.push(createFn());
+        }
+    }
+    acquire(...args) {
+        let obj = this.available.pop() || this.createFn();
+        this.resetFn(obj, ...args);
+        this.inUse.push(obj);
+        return obj;
+    }
+    release(obj) {
+        const idx = this.inUse.indexOf(obj);
+        if (idx >= 0) this.inUse.splice(idx, 1);
+        this.available.push(obj);
+    }
+    releaseAll() {
+        this.available.push(...this.inUse);
+        this.inUse.length = 0;
     }
 }
 

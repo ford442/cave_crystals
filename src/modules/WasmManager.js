@@ -150,9 +150,7 @@ export class WasmManager {
      * Calculate crystal growth rate
      */
     calculateCrystalGrowth(baseRate, multiplier) {
-        if (this.ready && this.exports.calculateCrystalGrowth) {
-            return this.exports.calculateCrystalGrowth(baseRate, multiplier);
-        }
+        // Trivial math — always use JS to avoid WASM bridge overhead
         return baseRate * multiplier;
     }
 
@@ -160,9 +158,7 @@ export class WasmManager {
      * Calculate growth multiplier based on score
      */
     calculateGrowthMultiplier(score, divisor = 500) {
-        if (this.ready && this.exports.calculateGrowthMultiplier) {
-            return this.exports.calculateGrowthMultiplier(score, divisor);
-        }
+        // Trivial math — always use JS to avoid WASM bridge overhead
         return 1 + (score / divisor);
     }
 
@@ -170,9 +166,7 @@ export class WasmManager {
      * Check if crystals have collided (game over)
      */
     checkCrystalGameOver(height1, height2, maxHeight) {
-        if (this.ready && this.exports.checkCrystalGameOver) {
-            return this.exports.checkCrystalGameOver(height1, height2, maxHeight);
-        }
+        // Trivial math — always use JS to avoid WASM bridge overhead
         return height1 + height2 >= maxHeight;
     }
 

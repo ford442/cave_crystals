@@ -30,6 +30,10 @@ canvas {
     z-index: 0;
 }
 
+#backgroundImage {
+    will-change: transform;
+}
+
 #gameCanvas {
     z-index: 1;
 }

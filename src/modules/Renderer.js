@@ -7,6 +7,15 @@ export class Renderer {
         this.width = canvas.width;
         this.height = canvas.height;
         this.laneWidth = this.width / GAME_CONFIG.lanes;
+        this._gradientCache = new Map();
+
+        // Offscreen canvas for scanlines pattern (Fix 7)
+        this.scanlineCanvas = document.createElement('canvas');
+        this.scanlineCanvas.width = 1;
+        this.scanlineCanvas.height = 4;
+        const sctx = this.scanlineCanvas.getContext('2d');
+        sctx.fillStyle = 'rgba(0, 0, 0, 1)';
+        sctx.fillRect(0, 0, 1, 2); // 2px line, 2px gap
     }
 
     resize(w, h) {
@@ -18,16 +27,15 @@ export class Renderer {
     }
 
     clear() {
-        this.ctx.clearRect(0, 0, this.width, this.height);
+        // No-op: clear is combined with the dark overlay in draw()
     }
 
     draw(gameState, launcher) {
         if (!this.ctx) return;
-        this.clear();
 
         // JUICE: Dynamic Lighting System
-        // 1. Darken the world so lights pop
-        this.ctx.fillStyle = 'rgba(0, 0, 10, 0.5)'; // Slight blue tint for cave atmosphere
+        // 1. Clear + darken in one fill
+        this.ctx.fillStyle = 'rgba(0, 0, 10, 1.0)';
         this.ctx.fillRect(0, 0, this.width, this.height);
 
         // 2. Render Additive Lighting Pass
@@ -52,7 +60,8 @@ export class Renderer {
         // JUICE: Increased warp sensitivity to speed for more impact
         const warpMagnitude = gameState.shake + (launcherSpeed * 2.5);
 
-        const isWarping = warpMagnitude > 1.0;
+        const particleCount = gameState.particles ? gameState.particles.length : 0;
+        const isWarping = warpMagnitude > 3.0;
 
         // JUICE: Impact Zoom
         if (gameState.zoom && gameState.zoom > 1.0) {
@@ -87,7 +96,8 @@ export class Renderer {
         this.drawHoloGrid(gameState, launcher);
         this.drawTargetingSystem(gameState, launcher);
 
-        // Draw Crystals with Chromatic Aberration
+        // Draw Crystals (skip chromatic aberration on crystals during explosions)
+        const skipChromaticOnCrystals = particleCount > 50;
         gameState.crystals.forEach(c => {
              // JUICE: Apply Shockwave Distortion
              // Calculate center of crystal
@@ -98,22 +108,7 @@ export class Renderer {
              this.ctx.save();
              this.ctx.translate(distortion.x, distortion.y);
 
-             if (isWarping) {
-                 this.ctx.globalCompositeOperation = 'screen';
-                 // Red Channel Offset
-                 this.ctx.save();
-                 this.ctx.translate(-3 - (warpMagnitude * 0.1), 0);
-                 this.drawComplexCrystal(c, 'red');
-                 this.ctx.restore();
-
-                 // Blue Channel Offset
-                 this.ctx.save();
-                 this.ctx.translate(3 + (warpMagnitude * 0.1), 0);
-                 this.drawComplexCrystal(c, 'blue');
-                 this.ctx.restore();
-
-                 this.ctx.globalCompositeOperation = 'source-over';
-             }
+             // Only apply chromatic aberration to launcher, not crystals
              this.drawComplexCrystal(c);
              this.ctx.restore();
         });
@@ -221,20 +216,28 @@ export class Renderer {
 
         const time = Date.now() / 1000;
 
-        // Helper to draw a light blob
+        // Helper to draw a light blob with cached gradients
         const drawLight = (x, y, color, radius, intensity = 1.0) => {
-             const grad = this.ctx.createRadialGradient(x, y, 0, x, y, radius);
-             // Parse hex to rgba for gradient
-             const rgb = this.hexToRgb(color) || {r:255, g:255, b:255};
-
-             grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${intensity})`);
-             grad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${intensity * 0.3})`);
-             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
+             const bucketRadius = Math.floor(radius / 25) * 25 + 25;
+             const cacheKey = `${color}-${bucketRadius}`;
+             let grad = this._gradientCache.get(cacheKey);
+             if (!grad) {
+                 grad = this.ctx.createRadialGradient(0, 0, 0, 0, 0, bucketRadius);
+                 const rgb = this.hexToRgb(color) || {r:255, g:255, b:255};
+                 grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1.0)`);
+                 grad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`);
+                 grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                 this._gradientCache.set(cacheKey, grad);
+             }
+             this.ctx.save();
+             this.ctx.translate(x, y);
+             this.ctx.scale(radius / bucketRadius, radius / bucketRadius);
              this.ctx.fillStyle = grad;
+             this.ctx.globalAlpha = intensity;
              this.ctx.beginPath();
-             this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+             this.ctx.arc(0, 0, bucketRadius, 0, Math.PI * 2);
              this.ctx.fill();
+             this.ctx.restore();
         };
 
         // 1. Crystal Lights
@@ -340,7 +343,8 @@ export class Renderer {
 
     drawHoloGrid(gameState, launcher) {
         // JUICE: Dynamic Holographic Grid
-        const gridSize = 50; // Cell size
+        const particleCount = gameState.particles ? gameState.particles.length : 0;
+        const gridSize = particleCount > 30 ? 80 : 50; // Coarser grid during chaos
         const time = Date.now();
         const pulse = Math.sin(time / 1000) * 0.5 + 0.5; // Slow heartbeat pulse
 
@@ -352,6 +356,9 @@ export class Renderer {
         const activeLane = launcher ? launcher.targetLane : -1;
         const activeX = (activeLane * this.laneWidth) + (this.laneWidth / 2);
 
+        // Only calculate shockwave distortion when shockwaves exist
+        const hasActiveShockwaves = gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
+
         this.ctx.save();
 
         // Horizontal Lines
@@ -361,7 +368,12 @@ export class Renderer {
              let start = true;
              for (let x = 0; x <= this.width; x += gridSize) {
                  // Calculate distortion at this vertex
-                 const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                 let distX = 0, distY = 0;
+                 if (hasActiveShockwaves) {
+                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                     distX = dist.x;
+                     distY = dist.y;
+                 }
 
                  // Apply heartbeat breathe
                  // Center breathe: expand from center
@@ -372,8 +384,8 @@ export class Renderer {
                  const breatheX = dx * 0.01 * pulse;
                  const breatheY = dy * 0.01 * pulse;
 
-                 const finalX = x + dist.x + breatheX;
-                 const finalY = y + dist.y + breatheY;
+                 const finalX = x + distX + breatheX;
+                 const finalY = y + distY + breatheY;
 
                  if (start) {
                      this.ctx.moveTo(finalX, finalY);
@@ -408,7 +420,12 @@ export class Renderer {
              this.ctx.beginPath();
              let start = true;
              for (let y = 0; y <= this.height; y += gridSize) {
-                 const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                 let distX = 0, distY = 0;
+                 if (hasActiveShockwaves) {
+                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                     distX = dist.x;
+                     distY = dist.y;
+                 }
 
                  const cx = this.width / 2;
                  const cy = this.height / 2;
@@ -417,8 +434,8 @@ export class Renderer {
                  const breatheX = dx * 0.01 * pulse;
                  const breatheY = dy * 0.01 * pulse;
 
-                 const finalX = x + dist.x + breatheX;
-                 const finalY = y + dist.y + breatheY;
+                 const finalX = x + distX + breatheX;
+                 const finalY = y + distY + breatheY;
 
                  if (start) {
                      this.ctx.moveTo(finalX, finalY);
@@ -1080,8 +1097,8 @@ export class Renderer {
             ]}
         ];
 
-        // Find and render the appropriate configuration
-        const config = shardConfigs.find(cfg => cfg.condition) || shardConfigs[0]; // Fallback to first config
+        // Use cached shard config index from crystal
+        const config = shardConfigs[c.shardConfigIndex || 0] || shardConfigs[0];
         config.shards.forEach(shard => {
             drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
         });
@@ -1112,11 +1129,10 @@ export class Renderer {
         if (!this.ctx) return;
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'source-over';
-        // Scanlines opacity scales with intensity but stays subtle
-        this.ctx.fillStyle = `rgba(0, 0, 0, ${intensity * 0.3})`;
-        for (let y = 0; y < this.height; y += 4) {
-            this.ctx.fillRect(0, y, this.width, 2);
-        }
+        this.ctx.globalAlpha = intensity * 0.3;
+        this.ctx.fillStyle = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.globalAlpha = 1.0;
         this.ctx.restore();
     }
 
@@ -1141,10 +1157,10 @@ export class Renderer {
     }
 
     calculateShockwaveDistortion(x, y, gameState) {
+        if (!gameState.shockwaves || gameState.shockwaves.length === 0) return { x: 0, y: 0 };
+
         let dx = 0;
         let dy = 0;
-
-        if (!gameState.shockwaves) return { x: 0, y: 0 };
 
         gameState.shockwaves.forEach(sw => {
             // Only affect if shockwave is strong/active

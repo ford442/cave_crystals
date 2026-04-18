@@ -1,6 +1,6 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle, DustParticle } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle, DustParticle, ParticlePool } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -52,8 +52,21 @@ export class Game {
             heartbeatTimer: 0,
             timeScale: 1.0,
             targetTimeScale: 1.0,
-            slowMoTimer: 0
+            slowMoTimer: 0,
+            laneMap: new Map() // key: lane, value: { top: crystal, bottom: crystal }
         };
+
+        // Object pools for high-frequency particles (reduces GC pressure)
+        this.particlePool = new ParticlePool(
+            () => new Particle(0, 0, '#fff'),
+            (obj, ...args) => obj.reset(...args),
+            100
+        );
+        this.trailPool = new ParticlePool(
+            () => new TrailParticle(0, 0, '#fff'),
+            (obj, ...args) => obj.reset(...args),
+            100
+        );
 
         // Initialize WASM asynchronously
         wasmManager.init().then(() => {
@@ -133,6 +146,17 @@ export class Game {
             this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
             this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
         }
+        this.updateLaneMap();
+    }
+
+    updateLaneMap() {
+        this.state.laneMap.clear();
+        this.state.crystals.forEach(c => {
+            if (!this.state.laneMap.has(c.lane)) {
+                this.state.laneMap.set(c.lane, { top: null, bottom: null });
+            }
+            this.state.laneMap.get(c.lane)[c.type] = c;
+        });
     }
 
     handleMouseMove(e) {
@@ -200,7 +224,7 @@ export class Game {
                 vy = wasmManager.getShatterVy(i, count, speed);
             }
 
-            this.state.particles.push(new Particle(x, y, color, vx, vy, type));
+            this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, type));
         }
     }
 
@@ -219,13 +243,13 @@ export class Game {
                  vy = Math.sin(rndAngle) * speed;
              }
 
-             this.state.particles.push(new Particle(x, y, color, vx, vy, 'debris'));
+             this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, 'debris'));
         }
     }
 
     createCrystalChunk(x, y, color, dirY = -1) {
         // JUICE: Spawn a large chunk that falls and shatters on impact
-        const p = new Particle(x, y, color, null, null, 'chunk');
+        const p = this.particlePool.acquire(x, y, color, null, null, 'chunk');
         // Initial velocity popping off (up and out or down and out)
         p.vx = (Math.random() - 0.5) * 4;
         p.vy = (Math.random() * 5 + 2) * dirY;
@@ -233,7 +257,7 @@ export class Game {
     }
 
     createTrailParticle(x, y, color) {
-        this.state.particles.push(new TrailParticle(x, y, color));
+        this.state.particles.push(this.trailPool.acquire(x, y, color));
     }
 
     createShockwave(x, y, color) {
@@ -267,14 +291,22 @@ export class Game {
 
             this.state.shakeOffset = { x: dx, y: dy, angle: angle };
 
-            // Apply to background
+            // Apply to background only if transform changed
             if (this.background && this.background.image) {
-                this.background.image.style.transform = `translate(${dx}px, ${dy}px) rotate(${angle}rad) scale(1.02)`;
+                const newTransform = `translate(${dx}px, ${dy}px) rotate(${angle}rad) scale(1.02)`;
+                if (this._lastBgTransform !== newTransform) {
+                    this.background.image.style.transform = newTransform;
+                    this._lastBgTransform = newTransform;
+                }
             }
         } else {
             this.state.shakeOffset = { x: 0, y: 0, angle: 0 };
             if (this.background && this.background.image) {
-                this.background.image.style.transform = 'translate(0, 0) rotate(0) scale(1)';
+                const newTransform = 'translate(0, 0) rotate(0) scale(1)';
+                if (this._lastBgTransform !== newTransform) {
+                    this.background.image.style.transform = newTransform;
+                    this._lastBgTransform = newTransform;
+                }
             }
         }
     }
@@ -305,7 +337,7 @@ export class Game {
             const y = this.renderer.height / 2;
             const color = COLORS[Math.floor(Math.random() * COLORS.length)].hex;
             // Use existing particle system
-            this.state.particles.push(new Particle(x, y, color));
+            this.state.particles.push(this.particlePool.acquire(x, y, color));
         }
 
         // Juice: All crystals jump
@@ -373,7 +405,8 @@ export class Game {
             c.shakeY = 0;
             c.isCritical = false;
 
-            const opposite = this.state.crystals.find(oc => oc.lane === c.lane && oc.type !== c.type);
+            const laneCrystals = this.state.laneMap.get(c.lane);
+            const opposite = laneCrystals ? laneCrystals[c.type === 'top' ? 'bottom' : 'top'] : null;
             if (opposite) {
                 const totalHeight = c.height + opposite.height;
                 const dangerThreshold = this.renderer.height * 0.75;
@@ -400,7 +433,7 @@ export class Game {
                          const vy = wasmManager.getSmokeVy(Math.random());
 
                          // Dark gray smoke
-                         this.state.particles.push(new Particle(x, tipY, 'rgba(100, 100, 100, 0.5)', vx, vy));
+                         this.state.particles.push(this.particlePool.acquire(x, tipY, 'rgba(100, 100, 100, 0.5)', vx, vy));
                     }
                 }
 
@@ -438,7 +471,13 @@ export class Game {
         // Update Spores
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
-            s.update(this.state.crystals, this.renderer.height, this.createParticles.bind(this), (points, isMatch, x, y, color) => {
+            const laneCrystals = this.state.laneMap.get(s.lane);
+            s.update(
+                laneCrystals ? laneCrystals.top : null,
+                laneCrystals ? laneCrystals.bottom : null,
+                this.renderer.height,
+                this.createParticles.bind(this),
+                (points, isMatch, x, y, color) => {
 
                 if (isMatch) {
                     // Spawn Soul Particles for Collection Juice
@@ -546,7 +585,15 @@ export class Game {
                 p.life = 0; // Destroy chunk
             }
 
-            if (p.life <= 0) this.state.particles.splice(i, 1);
+            if (p.life <= 0) {
+                // Release back to pool to reduce GC pressure
+                if (p instanceof TrailParticle) {
+                    this.trailPool.release(p);
+                } else {
+                    this.particlePool.release(p);
+                }
+                this.state.particles.splice(i, 1);
+            }
         }
 
         // Update Shockwaves
@@ -598,13 +645,12 @@ export class Game {
         // Only update DOM if score changed significantly (counting up effect)
         if (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore)) {
              this.ui.score.innerText = Math.floor(this.state.displayScore);
-             // Pulse effect on every tick of increase
-             const scale = 1.0 + (this.state.shake * 0.01) + 0.1;
-             this.ui.score.style.transform = `scale(${scale})`;
-        } else {
-             // Passive pulse from shake
-             const scale = 1.0 + (this.state.shake * 0.01);
-             this.ui.score.style.transform = `scale(${scale})`;
+        }
+        // Cache score transform to avoid style recalc every frame
+        const newScale = 1.0 + (this.state.shake * 0.01) + (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore) ? 0.1 : 0);
+        if (this._lastScoreScale !== newScale) {
+            this.ui.score.style.transform = `scale(${newScale})`;
+            this._lastScoreScale = newScale;
         }
     }
 
