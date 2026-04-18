@@ -11,7 +11,9 @@ export class Crystal {
         this.flash = 0;
         this.shapeSeed = Math.random();
         this.lightPhase = Math.random() * Math.PI * 2; // Randomize start phase for pulsing light
-        this.spawnTime = Date.now() + spawnDelay;
+        this.spawnDelay = spawnDelay;
+        this.spawnTimer = spawnDelay; // Frame counter for spawn delay
+        this.hasSpawned = spawnDelay <= 0;
 
         // Elastic Juice properties
         this.scaleX = 1.0;
@@ -45,9 +47,14 @@ export class Crystal {
         if(this.flash > 0) this.flash -= 0.1 * timeScale;
 
         // Handle spawn delay
-        if (Date.now() < this.spawnTime) {
-            this.scaleY = 0.0;
-            return;
+        if (!this.hasSpawned) {
+            this.spawnTimer -= 16.67 * timeScale; // Approximate frame time
+            if (this.spawnTimer <= 0) {
+                this.hasSpawned = true;
+            } else {
+                this.scaleY = 0.0;
+                return;
+            }
         }
 
         // Determine Target Scales for Organic Feel
@@ -360,6 +367,7 @@ export class Particle {
 
 export class TrailParticle {
     constructor(x, y, color) {
+        this.isTrail = true;
         this._init(x, y, color);
     }
 
@@ -405,7 +413,10 @@ export class ParticlePool {
     }
     release(obj) {
         const idx = this.inUse.indexOf(obj);
-        if (idx >= 0) this.inUse.splice(idx, 1);
+        if (idx >= 0) {
+            this.inUse[idx] = this.inUse[this.inUse.length - 1];
+            this.inUse.pop();
+        }
         this.available.push(obj);
     }
     releaseAll() {
@@ -629,29 +640,24 @@ export class DustParticle {
         this.vy += (this.baseVy - this.vy) * drag;
 
         // Shockwave Interaction
-        if (shockwaves) {
-            shockwaves.forEach(sw => {
-                // Only active shockwaves
-                if (sw.life <= 0) return;
+        if (shockwaves && shockwaves.length > 0) {
+            for (let si = 0; si < shockwaves.length; si++) {
+                const sw = shockwaves[si];
+                if (sw.life <= 0) continue;
 
                 const dx = this.x - sw.x;
                 const dy = this.y - sw.y;
                 const distSq = dx*dx + dy*dy;
-                // Expanded radius for influence
                 const radius = sw.radius + 100;
+                const radiusSq = radius * radius;
 
-                if (distSq < radius * radius) {
+                if (distSq < radiusSq && distSq > 0) {
                     const dist = Math.sqrt(distSq);
-                    if (dist > 0) {
-                        // Push away
-                        // Force strongest near the wave front? Or just inside?
-                        // Let's just push away from center
-                        const force = (1.0 - (dist / radius)) * 2.0 * sw.life;
-                        this.vx += (dx / dist) * force * timeScale;
-                        this.vy += (dy / dist) * force * timeScale;
-                    }
+                    const force = (1.0 - (dist / radius)) * 2.0 * sw.life;
+                    this.vx += (dx / dist) * force * timeScale;
+                    this.vy += (dy / dist) * force * timeScale;
                 }
-            });
+            }
         }
     }
 }

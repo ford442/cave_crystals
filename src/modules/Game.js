@@ -75,9 +75,19 @@ export class Game {
             console.warn('WASM initialization failed, using JavaScript fallback:', err);
         });
 
+        // Cache bound callbacks to eliminate per-frame function allocations
+        this._boundLoop = this.loop.bind(this);
+        this._boundCreateParticles = this.createParticles.bind(this);
+        this._boundCreateShockwave = this.createShockwave.bind(this);
+        this._boundCreateTrailParticle = this.createTrailParticle.bind(this);
+        this._boundCreateDebris = this.createDebris.bind(this);
+        this._boundCreateCrystalChunk = this.createCrystalChunk.bind(this);
+        this._boundCreateImpactDust = this.createImpactDust.bind(this);
+        this._boundUpdateUI = this.updateUI.bind(this);
+
         this.bindEvents();
         this.resize();
-        requestAnimationFrame(this.loop.bind(this));
+        requestAnimationFrame(this._boundLoop);
     }
 
     bindEvents() {
@@ -289,7 +299,9 @@ export class Game {
             const dy = (Math.random() - 0.5) * this.state.shake + kick; // Add kick to vertical shake
             const angle = (Math.random() - 0.5) * (this.state.shake * 0.002); // Subtle rotation
 
-            this.state.shakeOffset = { x: dx, y: dy, angle: angle };
+            this.state.shakeOffset.x = dx;
+            this.state.shakeOffset.y = dy;
+            this.state.shakeOffset.angle = angle;
 
             // Apply to background only if transform changed
             if (this.background && this.background.image) {
@@ -300,7 +312,9 @@ export class Game {
                 }
             }
         } else {
-            this.state.shakeOffset = { x: 0, y: 0, angle: 0 };
+            this.state.shakeOffset.x = 0;
+            this.state.shakeOffset.y = 0;
+            this.state.shakeOffset.angle = 0;
             if (this.background && this.background.image) {
                 const newTransform = 'translate(0, 0) rotate(0) scale(1)';
                 if (this._lastBgTransform !== newTransform) {
@@ -476,7 +490,7 @@ export class Game {
                 laneCrystals ? laneCrystals.top : null,
                 laneCrystals ? laneCrystals.bottom : null,
                 this.renderer.height,
-                this.createParticles.bind(this),
+                this._boundCreateParticles,
                 (points, isMatch, x, y, color) => {
 
                 if (isMatch) {
@@ -545,15 +559,16 @@ export class Game {
                         this.createFloatingText(x, y, "MISS", '#f00');
                     }
                 }
-            }, this.createShockwave.bind(this), this.createTrailParticle.bind(this), this.createDebris.bind(this), this.createCrystalChunk.bind(this), timeScale);
+            }, this._boundCreateShockwave, this._boundCreateTrailParticle, this._boundCreateDebris, this._boundCreateCrystalChunk, timeScale);
             if (!s.active) {
-                this.state.spores.splice(i, 1);
-                this.updateUI();
+                this.state.spores[i] = this.state.spores[this.state.spores.length - 1];
+                this.state.spores.pop();
+                this._boundUpdateUI();
             }
         }
 
         // Pass trail callback for juice
-        this.launcher.update(this.createTrailParticle.bind(this), timeScale);
+        this.launcher.update(this._boundCreateTrailParticle, timeScale);
 
         // Shared visual updates (including Soul Particles and Score Lerp)
         this.updateSharedVisuals(dt, timeScale);
@@ -568,7 +583,7 @@ export class Game {
             p.update(
                 this.renderer.width,
                 this.renderer.height,
-                this.createImpactDust.bind(this),
+                this._boundCreateImpactDust,
                 timeScale
             );
 
@@ -587,12 +602,13 @@ export class Game {
 
             if (p.life <= 0) {
                 // Release back to pool to reduce GC pressure
-                if (p instanceof TrailParticle) {
+                if (p.isTrail) {
                     this.trailPool.release(p);
                 } else {
                     this.particlePool.release(p);
                 }
-                this.state.particles.splice(i, 1);
+                this.state.particles[i] = this.state.particles[this.state.particles.length - 1];
+                this.state.particles.pop();
             }
         }
 
@@ -600,13 +616,16 @@ export class Game {
         for (let i = this.state.shockwaves.length - 1; i >= 0; i--) {
             let sw = this.state.shockwaves[i];
             sw.update(timeScale);
-            if (sw.life <= 0) this.state.shockwaves.splice(i, 1);
+            if (sw.life <= 0) {
+                this.state.shockwaves[i] = this.state.shockwaves[this.state.shockwaves.length - 1];
+                this.state.shockwaves.pop();
+            }
         }
 
         // Update Soul Particles
         for (let i = this.state.soulParticles.length - 1; i >= 0; i--) {
             let sp = this.state.soulParticles[i];
-            const arrived = sp.update(this.createTrailParticle.bind(this), timeScale);
+            const arrived = sp.update(this._boundCreateTrailParticle, timeScale);
 
             if (arrived) {
                 if (sp.scoreValue > 0) {
@@ -619,7 +638,8 @@ export class Game {
                         this.triggerLevelUp();
                     }
                 }
-                this.state.soulParticles.splice(i, 1);
+                this.state.soulParticles[i] = this.state.soulParticles[this.state.soulParticles.length - 1];
+                this.state.soulParticles.pop();
             }
         }
 
@@ -627,7 +647,10 @@ export class Game {
         for (let i = this.state.floatingTexts.length - 1; i >= 0; i--) {
             let ft = this.state.floatingTexts[i];
             ft.update(timeScale);
-            if (ft.life <= 0) this.state.floatingTexts.splice(i, 1);
+            if (ft.life <= 0) {
+                this.state.floatingTexts[i] = this.state.floatingTexts[this.state.floatingTexts.length - 1];
+                this.state.floatingTexts.pop();
+            }
         }
 
         // Update Atmospheric Dust
@@ -677,7 +700,7 @@ export class Game {
             // Still draw (frozen frame), maybe with continued shake
             this.calculateShake();
             this.renderer.draw(this.state, this.launcher);
-            requestAnimationFrame(this.loop.bind(this));
+            requestAnimationFrame(this._boundLoop);
             return;
         }
 
@@ -690,7 +713,7 @@ export class Game {
         this.calculateShake();
         this.renderer.draw(this.state, this.launcher);
 
-        requestAnimationFrame(this.loop.bind(this));
+        requestAnimationFrame(this._boundLoop);
     }
 
     shatterAllCrystals() {

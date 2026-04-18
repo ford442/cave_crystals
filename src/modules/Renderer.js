@@ -16,6 +16,9 @@ export class Renderer {
         const sctx = this.scanlineCanvas.getContext('2d');
         sctx.fillStyle = 'rgba(0, 0, 0, 1)';
         sctx.fillRect(0, 0, 1, 2); // 2px line, 2px gap
+
+        // Cache scanline pattern once
+        this.scanlinePattern = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
     }
 
     resize(w, h) {
@@ -141,7 +144,7 @@ export class Renderer {
         }
         gameState.spores.forEach(s => this.drawSpore(s));
         gameState.particles.forEach(p => {
-             if (p.constructor.name === 'TrailParticle') {
+             if (p.isTrail) {
                  this.drawTrailParticle(p);
              } else {
                  this.drawParticle(p);
@@ -229,15 +232,13 @@ export class Renderer {
                  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
                  this._gradientCache.set(cacheKey, grad);
              }
-             this.ctx.save();
-             this.ctx.translate(x, y);
-             this.ctx.scale(radius / bucketRadius, radius / bucketRadius);
-             this.ctx.fillStyle = grad;
+             const prevAlpha = this.ctx.globalAlpha;
              this.ctx.globalAlpha = intensity;
+             this.ctx.fillStyle = grad;
              this.ctx.beginPath();
-             this.ctx.arc(0, 0, bucketRadius, 0, Math.PI * 2);
+             this.ctx.arc(x, y, radius, 0, Math.PI * 2);
              this.ctx.fill();
-             this.ctx.restore();
+             this.ctx.globalAlpha = prevAlpha;
         };
 
         // 1. Crystal Lights
@@ -361,6 +362,34 @@ export class Renderer {
 
         this.ctx.save();
 
+        // Precompute breathe constants
+        const cx = this.width / 2;
+        const cy = this.height / 2;
+        const breatheScale = 0.01 * pulse;
+
+        // Inline shockwave distortion to avoid function call + object alloc
+        const getDistortion = (x, y) => {
+             let dx = 0, dy = 0;
+             for (let si = 0; si < gameState.shockwaves.length; si++) {
+                 const sw = gameState.shockwaves[si];
+                 if (sw.life <= 0) continue;
+                 const sdx = x - sw.x;
+                 const sdy = y - sw.y;
+                 const distSq = sdx*sdx + sdy*sdy;
+                 const band = 50;
+                 const delta = Math.sqrt(distSq) - sw.radius;
+                 if (Math.abs(delta) < band && distSq > 0) {
+                     const t = delta / band;
+                     const strength = Math.cos(t * Math.PI / 2);
+                     const force = 15.0 * strength * sw.life;
+                     const dist = Math.sqrt(distSq);
+                     dx += (sdx / dist) * force;
+                     dy += (sdy / dist) * force;
+                 }
+             }
+             return { x: dx, y: dy };
+         };
+
         // Horizontal Lines
         for (let y = 0; y <= this.height; y += gridSize) {
              this.ctx.beginPath();
@@ -370,19 +399,13 @@ export class Renderer {
                  // Calculate distortion at this vertex
                  let distX = 0, distY = 0;
                  if (hasActiveShockwaves) {
-                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                     const dist = getDistortion(x, y);
                      distX = dist.x;
                      distY = dist.y;
                  }
 
-                 // Apply heartbeat breathe
-                 // Center breathe: expand from center
-                 const cx = this.width / 2;
-                 const cy = this.height / 2;
-                 const dx = x - cx;
-                 const dy = y - cy;
-                 const breatheX = dx * 0.01 * pulse;
-                 const breatheY = dy * 0.01 * pulse;
+                 const breatheX = (x - cx) * breatheScale;
+                 const breatheY = (y - cy) * breatheScale;
 
                  const finalX = x + distX + breatheX;
                  const finalY = y + distY + breatheY;
@@ -422,17 +445,13 @@ export class Renderer {
              for (let y = 0; y <= this.height; y += gridSize) {
                  let distX = 0, distY = 0;
                  if (hasActiveShockwaves) {
-                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                     const dist = getDistortion(x, y);
                      distX = dist.x;
                      distY = dist.y;
                  }
 
-                 const cx = this.width / 2;
-                 const cy = this.height / 2;
-                 const dx = x - cx;
-                 const dy = y - cy;
-                 const breatheX = dx * 0.01 * pulse;
-                 const breatheY = dy * 0.01 * pulse;
+                 const breatheX = (x - cx) * breatheScale;
+                 const breatheY = (y - cy) * breatheScale;
 
                  const finalX = x + distX + breatheX;
                  const finalY = y + distY + breatheY;
@@ -693,11 +712,17 @@ export class Renderer {
         // Outer Glow/Halo
         // Rotate opposite for halo
         this.ctx.rotate(-spin * 2);
-        const grad = this.ctx.createRadialGradient(0, 0, baseRadius * 0.5, 0, 0, baseRadius * 1.8);
-        grad.addColorStop(0, '#fff');
-        grad.addColorStop(0.2, col.hex);
-        grad.addColorStop(1, 'transparent');
-        this.ctx.fillStyle = grad;
+        // Cache spore halo gradient by color
+        const sporeGradKey = `spore-${col.hex}`;
+        let sporeGrad = this._gradientCache.get(sporeGradKey);
+        if (!sporeGrad) {
+            sporeGrad = this.ctx.createRadialGradient(0, 0, 0.5, 0, 0, 1.8);
+            sporeGrad.addColorStop(0, '#fff');
+            sporeGrad.addColorStop(0.2, col.hex);
+            sporeGrad.addColorStop(1, 'transparent');
+            this._gradientCache.set(sporeGradKey, sporeGrad);
+        }
+        this.ctx.fillStyle = sporeGrad;
         this.ctx.beginPath();
         this.ctx.arc(0, 0, baseRadius * 2.0, 0, Math.PI * 2);
         this.ctx.fill();
@@ -1107,13 +1132,19 @@ export class Renderer {
     }
 
     darkenColor(hex, amount) {
-        // Helper to darken a hex color
+        // Helper to darken a hex color — cached to avoid regex per call
+        const cacheKey = `${hex}-${amount}`;
+        let cached = this._darkenColorCache && this._darkenColorCache.get(cacheKey);
+        if (cached) return cached;
         const rgb = this.hexToRgb(hex);
         if (!rgb) return hex;
         const r = Math.max(0, Math.floor(rgb.r * (1 - amount)));
         const g = Math.max(0, Math.floor(rgb.g * (1 - amount)));
         const b = Math.max(0, Math.floor(rgb.b * (1 - amount)));
-        return `rgb(${r},${g},${b})`;
+        const result = `rgb(${r},${g},${b})`;
+        if (!this._darkenColorCache) this._darkenColorCache = new Map();
+        this._darkenColorCache.set(cacheKey, result);
+        return result;
     }
 
     hexToRgb(hex) {
@@ -1130,7 +1161,7 @@ export class Renderer {
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'source-over';
         this.ctx.globalAlpha = intensity * 0.3;
-        this.ctx.fillStyle = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
+        this.ctx.fillStyle = this.scanlinePattern;
         this.ctx.fillRect(0, 0, this.width, this.height);
         this.ctx.globalAlpha = 1.0;
         this.ctx.restore();
