@@ -21,7 +21,8 @@ export class Game {
             preview: document.getElementById('nextSporePreview'),
             startBtn: document.getElementById('startBtn'),
             restartBtn: document.getElementById('restartBtn'),
-            fps: document.getElementById('fpsCounter')
+            fps: document.getElementById('fpsCounter'),
+            qualitySelect: document.getElementById('qualitySelect')
         };
 
         this.state = {
@@ -54,6 +55,8 @@ export class Game {
             timeScale: 1.0,
             targetTimeScale: 1.0,
             slowMoTimer: 0,
+            qualityMode: 'auto',
+            renderQuality: 'high',
             laneMap: new Map() // key: lane, value: { top: crystal, bottom: crystal }
         };
 
@@ -94,6 +97,9 @@ export class Game {
     bindEvents() {
         this.ui.startBtn.addEventListener('click', () => this.startGame());
         this.ui.restartBtn.addEventListener('click', () => this.resetGame());
+        if (this.ui.qualitySelect) {
+            this.ui.qualitySelect.addEventListener('change', () => this.setQualityMode(this.ui.qualitySelect.value));
+        }
         window.addEventListener('resize', () => this.resize());
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         window.addEventListener('mousedown', (e) => this.handleInput(e));
@@ -109,6 +115,7 @@ export class Game {
 
     startGame() {
         SoundManager.init();
+        this.setQualityMode(this.ui.qualitySelect ? this.ui.qualitySelect.value : this.state.qualityMode);
         this.state.active = true;
         this.state.score = 0;
         this.state.level = 1;
@@ -133,7 +140,8 @@ export class Game {
         this.state.impactFlash = 0;
 
         // Spawn Atmospheric Dust
-        for (let i = 0; i < 100; i++) {
+        const dustCount = this.state.renderQuality === 'low' ? 45 : this.state.renderQuality === 'medium' ? 80 : 120;
+        for (let i = 0; i < dustCount; i++) {
             const x = Math.random() * this.renderer.width;
             const y = Math.random() * this.renderer.height;
             this.state.dustParticles.push(new DustParticle(x, y));
@@ -223,16 +231,18 @@ export class Game {
     }
 
     createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
+        const qualityScale = this.getQualityScale();
+        const scaledCount = Math.max(1, Math.floor(count * qualityScale));
         const speed = type === 'spark' && count < 5 ? 2.0 : 8.0; // Slower for dust
-        for(let i=0; i<count; i++) {
+        for(let i=0; i<scaledCount; i++) {
             // Use WASM for juicy explosion pattern
             let vx, vy;
             if (angle !== null) {
-                vx = wasmManager.getDirectionalVx(i, count, speed, angle, spread);
-                vy = wasmManager.getDirectionalVy(i, count, speed, angle, spread);
+                vx = wasmManager.getDirectionalVx(i, scaledCount, speed, angle, spread);
+                vy = wasmManager.getDirectionalVy(i, scaledCount, speed, angle, spread);
             } else {
-                vx = wasmManager.getShatterVx(i, count, speed);
-                vy = wasmManager.getShatterVy(i, count, speed);
+                vx = wasmManager.getShatterVx(i, scaledCount, speed);
+                vy = wasmManager.getShatterVy(i, scaledCount, speed);
             }
 
             this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, type));
@@ -240,13 +250,14 @@ export class Game {
     }
 
     createDebris(x, y, color, count = 4, angle = null, spread = 1.0) {
-        for(let i=0; i<count; i++) {
+        const scaledCount = Math.max(1, Math.floor(count * this.getQualityScale()));
+        for(let i=0; i<scaledCount; i++) {
              let vx, vy;
              const speed = Math.random() * 5 + 3;
 
              if (angle !== null) {
-                 vx = wasmManager.getDirectionalVx(i, count, speed, angle, spread);
-                 vy = wasmManager.getDirectionalVy(i, count, speed, angle, spread);
+                 vx = wasmManager.getDirectionalVx(i, scaledCount, speed, angle, spread);
+                 vy = wasmManager.getDirectionalVy(i, scaledCount, speed, angle, spread);
              } else {
                  // Debris flies out randomly if no angle
                  const rndAngle = Math.random() * Math.PI * 2;
@@ -687,6 +698,49 @@ export class Game {
         this.ui.preview.style.boxShadow = `0 0 20px ${nextCol.hex}`;
     }
 
+    getQualityScale() {
+        if (this.state.renderQuality === 'low') return 0.55;
+        if (this.state.renderQuality === 'medium') return 0.8;
+        return 1.0;
+    }
+
+    setQualityMode(mode = 'auto') {
+        this.state.qualityMode = mode;
+        if (mode === 'auto') {
+            if (!this._smoothedFps) this._smoothedFps = 60;
+            if (this._smoothedFps < 50) {
+                this.state.renderQuality = 'low';
+            } else if (this._smoothedFps < 57) {
+                this.state.renderQuality = 'medium';
+            } else {
+                this.state.renderQuality = 'high';
+            }
+            return;
+        }
+        this.state.renderQuality = mode;
+    }
+
+    updateAdaptiveQuality(fps) {
+        if (!this._smoothedFps) this._smoothedFps = fps;
+        this._smoothedFps += (fps - this._smoothedFps) * 0.25;
+        if (this.state.qualityMode !== 'auto') return;
+
+        if (!this._qualityCooldownUntil) this._qualityCooldownUntil = 0;
+        const now = performance.now();
+        if (now < this._qualityCooldownUntil) return;
+
+        if (this._smoothedFps < 48 && this.state.renderQuality !== 'low') {
+            this.state.renderQuality = 'low';
+            this._qualityCooldownUntil = now + 2500;
+        } else if (this._smoothedFps < 57 && this.state.renderQuality === 'high') {
+            this.state.renderQuality = 'medium';
+            this._qualityCooldownUntil = now + 2000;
+        } else if (this._smoothedFps > 59 && this.state.renderQuality !== 'high') {
+            this.state.renderQuality = this.state.renderQuality === 'low' ? 'medium' : 'high';
+            this._qualityCooldownUntil = now + 2000;
+        }
+    }
+
     loop(timestamp) {
         if (!this.state.lastTime) this.state.lastTime = timestamp;
         let dt = timestamp - this.state.lastTime;
@@ -701,7 +755,11 @@ export class Game {
         this._fpsFrames++;
         if (timestamp - this._fpsLastTime >= 1000) {
             const fps = Math.round((this._fpsFrames * 1000) / (timestamp - this._fpsLastTime));
-            if (this.ui.fps) this.ui.fps.textContent = fps + ' FPS';
+            this.updateAdaptiveQuality(fps);
+            if (this.ui.fps) {
+                const qualityLabel = this.state.qualityMode === 'auto' ? `${this.state.renderQuality.toUpperCase()} AUTO` : this.state.renderQuality.toUpperCase();
+                this.ui.fps.textContent = `${fps} FPS · ${qualityLabel}`;
+            }
             this._fpsFrames = 0;
             this._fpsLastTime = timestamp;
         }

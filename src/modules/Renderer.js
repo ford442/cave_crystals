@@ -26,6 +26,12 @@ export class Renderer {
 
         // Cache for vignette gradient (invalidated on resize)
         this._vignetteGradient = null;
+        this._fogGradient = null;
+        this._qualityProfiles = {
+            high: { maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50, crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true },
+            medium: { maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65, crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false },
+            low: { maxDust: 55, maxParticles: 420, particleStride: 2, gridBase: 90, crystalDetail: 'low', postFX: false, lightShafts: false, fog: true, allowGridDistortion: false }
+        };
     }
 
     resize(w, h) {
@@ -35,14 +41,20 @@ export class Renderer {
         this.canvas.height = h;
         this.laneWidth = w / GAME_CONFIG.lanes;
         this._vignetteGradient = null; // invalidate cached gradient
+        this._fogGradient = null;
     }
 
     clear() {
         // No-op: clear is combined with the dark overlay in draw()
     }
 
+    getQualityProfile(quality = 'high') {
+        return this._qualityProfiles[quality] || this._qualityProfiles.high;
+    }
+
     draw(gameState, launcher) {
         if (!this.ctx) return;
+        const profile = this.getQualityProfile(gameState.renderQuality);
 
         // JUICE: Dynamic Lighting System
         // 1. Clear + darken in one fill
@@ -51,7 +63,7 @@ export class Renderer {
 
         // 2. Render Additive Lighting Pass
         this.ctx.save();
-        this.drawLighting(gameState, launcher);
+        this.drawLighting(gameState, launcher, profile);
         this.ctx.restore();
 
         // Background Color Override based on Flash
@@ -101,15 +113,19 @@ export class Renderer {
         }
 
         if (gameState.dustParticles) {
-            this.drawDust(gameState.dustParticles);
+            this.drawDust(gameState.dustParticles, profile.maxDust);
         }
 
-        this.drawHoloGrid(gameState, launcher);
+        if (profile.fog) {
+            this.drawVolumetricFog(gameState, profile);
+        }
+
+        this.drawHoloGrid(gameState, launcher, profile);
         this.drawTargetingSystem(gameState, launcher);
 
         // Draw Crystals (skip chromatic aberration on crystals during explosions)
-        const skipChromaticOnCrystals = particleCount > 50;
-        gameState.crystals.forEach(c => {
+        for (let i = 0; i < gameState.crystals.length; i++) {
+            const c = gameState.crystals[i];
              // JUICE: Apply Shockwave Distortion
              // Calculate center of crystal
              const cX = (c.lane * this.laneWidth) + (this.laneWidth / 2);
@@ -120,9 +136,9 @@ export class Renderer {
              this.ctx.translate(distortion.x, distortion.y);
 
              // Only apply chromatic aberration to launcher, not crystals
-             this.drawComplexCrystal(c, null, particleCount);
+             this.drawComplexCrystal(c, null, particleCount, profile);
              this.ctx.restore();
-        });
+        }
 
         // Draw Launcher with Chromatic Aberration (Motion Blur)
         if (launcher) {
@@ -150,31 +166,43 @@ export class Renderer {
             this.drawCursor(gameState, launcher);
             this.ctx.restore();
         }
-        gameState.spores.forEach(s => this.drawSpore(s));
-        gameState.particles.forEach(p => {
-             if (p.isTrail) {
-                 this.drawTrailParticle(p);
-             } else {
-                 this.drawParticle(p);
-             }
-        });
+        for (let i = 0; i < gameState.spores.length; i++) {
+            this.drawSpore(gameState.spores[i]);
+        }
+
+        const particleLimit = Math.min(profile.maxParticles, particleCount);
+        const stride = particleCount > profile.maxParticles ? profile.particleStride + 1 : profile.particleStride;
+        for (let i = 0; i < particleLimit; i += stride) {
+            const p = gameState.particles[i];
+            if (p.isTrail) {
+               this.drawTrailParticle(p);
+            } else {
+               this.drawParticle(p);
+            }
+        }
 
         if (gameState.shockwaves) {
-            gameState.shockwaves.forEach(sw => this.drawShockwave(sw));
+            for (let i = 0; i < gameState.shockwaves.length; i++) {
+               this.drawShockwave(gameState.shockwaves[i]);
+            }
         }
 
         if (gameState.floatingTexts) {
-            gameState.floatingTexts.forEach(ft => this.drawFloatingText(ft));
+            for (let i = 0; i < gameState.floatingTexts.length; i++) {
+               this.drawFloatingText(gameState.floatingTexts[i]);
+            }
         }
 
         if (gameState.soulParticles) {
-            gameState.soulParticles.forEach(sp => this.drawSoulParticle(sp));
+            for (let i = 0; i < gameState.soulParticles.length; i++) {
+               this.drawSoulParticle(gameState.soulParticles[i]);
+            }
         }
 
         this.ctx.restore();
 
         // JUICE: Holographic Glitch & Scanlines
-        if (gameState.criticalIntensity > 0.01) {
+        if (profile.postFX && gameState.criticalIntensity > 0.01) {
              this.drawScanlines(gameState.criticalIntensity);
              if (gameState.criticalIntensity > 0.2) {
                  this.drawGlitch(gameState.criticalIntensity);
@@ -189,6 +217,13 @@ export class Renderer {
         // Draw Impact Flash (independent of shake translation)
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
+        }
+
+        if (profile.lightShafts) {
+            this.drawLightShafts(gameState, launcher);
+        }
+        if (profile.postFX) {
+            this.drawFilmGrain();
         }
     }
 
@@ -228,7 +263,7 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawLighting(gameState, launcher) {
+    drawLighting(gameState, launcher, profile) {
         this.ctx.globalCompositeOperation = 'lighter';
 
         const time = Date.now() / 1000;
@@ -280,7 +315,7 @@ export class Renderer {
 
              // Wall Reflections
              // If in first lane, reflect on left wall
-             if (c.lane === 0) {
+             if (profile.crystalDetail !== 'low' && c.lane === 0) {
                  // Squeeze the light vertically against the wall
                  this.ctx.save();
                  this.ctx.translate(0, y);
@@ -289,7 +324,7 @@ export class Renderer {
                  this.ctx.restore();
              }
              // If in last lane, reflect on right wall
-             if (c.lane === GAME_CONFIG.lanes - 1) {
+             if (profile.crystalDetail !== 'low' && c.lane === GAME_CONFIG.lanes - 1) {
                  this.ctx.save();
                  this.ctx.translate(this.width, y);
                  this.ctx.scale(0.3, 2.0);
@@ -321,7 +356,7 @@ export class Renderer {
         // 5. Particle Sparkles — capped hard to save perf
         // Skip entirely if there are too many particles (chaos mode)
         const particleCount = gameState.particles ? gameState.particles.length : 0;
-        if (particleCount <= 50) {
+        if (profile.crystalDetail !== 'low' && particleCount <= 50) {
             let litCount = 0;
             const maxLit = 15;
             for (let i = 0; i < particleCount && litCount < maxLit; i++) {
@@ -336,18 +371,20 @@ export class Renderer {
         this.ctx.globalCompositeOperation = 'source-over';
     }
 
-    drawDust(particles) {
+    drawDust(particles, maxCount = 100) {
         if (!particles) return;
         this.ctx.save();
         // Faint blue-ish white for dust
         this.ctx.fillStyle = 'rgb(200, 220, 255)';
-        particles.forEach(p => {
+        const count = Math.min(particles.length, maxCount);
+        for (let i = 0; i < count; i++) {
+            const p = particles[i];
              // Use pre-calculated renderAlpha which includes pulse
              this.ctx.globalAlpha = p.renderAlpha || 0.1;
              this.ctx.beginPath();
              this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
              this.ctx.fill();
-        });
+        }
         this.ctx.restore();
     }
 
@@ -361,10 +398,90 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawHoloGrid(gameState, launcher) {
+    drawVolumetricFog(gameState, profile) {
+        if (!this._fogGradient) {
+            this._fogGradient = this.ctx.createLinearGradient(0, 0, 0, this.height);
+            this._fogGradient.addColorStop(0, 'rgba(70, 95, 130, 0.22)');
+            this._fogGradient.addColorStop(0.5, 'rgba(30, 60, 95, 0.08)');
+            this._fogGradient.addColorStop(1, 'rgba(5, 15, 28, 0.32)');
+        }
+
+        this.ctx.save();
+        this.ctx.fillStyle = this._fogGradient;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        const pulse = 0.04 + Math.sin(Date.now() / 1600) * 0.02;
+        this.ctx.globalAlpha = Math.max(0.02, pulse);
+        this.ctx.globalCompositeOperation = 'screen';
+        const sweeps = profile.crystalDetail === 'high' ? 3 : 1;
+        for (let i = 0; i < sweeps; i++) {
+            const x = ((Date.now() * 0.01) + (i * this.width * 0.35)) % (this.width + 240) - 120;
+            const grad = this.ctx.createLinearGradient(x, 0, x + 160, this.height);
+            grad.addColorStop(0, 'rgba(255,255,255,0)');
+            grad.addColorStop(0.5, 'rgba(170,220,255,0.32)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            this.ctx.fillStyle = grad;
+            this.ctx.fillRect(x - 120, 0, 240, this.height);
+        }
+        this.ctx.restore();
+    }
+
+    drawLightShafts(gameState, launcher) {
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'screen';
+        this.ctx.globalAlpha = 0.16;
+        const lane = launcher ? launcher.targetLane : Math.floor(GAME_CONFIG.lanes / 2);
+        const centerX = (lane * this.laneWidth) + (this.laneWidth / 2);
+        for (let i = -1; i <= 1; i++) {
+            const x = centerX + (i * this.laneWidth * 0.8);
+            const shaft = this.ctx.createLinearGradient(x, 0, x, this.height * 0.65);
+            shaft.addColorStop(0, 'rgba(180, 255, 255, 0.5)');
+            shaft.addColorStop(1, 'rgba(180, 255, 255, 0)');
+            this.ctx.fillStyle = shaft;
+            this.ctx.beginPath();
+            this.ctx.moveTo(x - 50, 0);
+            this.ctx.lineTo(x + 50, 0);
+            this.ctx.lineTo(x + 180, this.height * 0.65);
+            this.ctx.lineTo(x - 180, this.height * 0.65);
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
+        this.ctx.restore();
+    }
+
+    drawFilmGrain() {
+        const now = Date.now();
+        if (!this._grainCanvas) {
+            this._grainCanvas = document.createElement('canvas');
+            this._grainCanvas.width = 128;
+            this._grainCanvas.height = 128;
+            this._grainCtx = this._grainCanvas.getContext('2d');
+        }
+        if (!this._lastGrainRefresh || now - this._lastGrainRefresh > 90) {
+            const img = this._grainCtx.createImageData(128, 128);
+            for (let i = 0; i < img.data.length; i += 4) {
+                const v = Math.floor(Math.random() * 30);
+                img.data[i] = v;
+                img.data[i + 1] = v;
+                img.data[i + 2] = v;
+                img.data[i + 3] = 20;
+            }
+            this._grainCtx.putImageData(img, 0, 0);
+            this._grainPattern = this.ctx.createPattern(this._grainCanvas, 'repeat');
+            this._lastGrainRefresh = now;
+        }
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'overlay';
+        this.ctx.globalAlpha = 0.12;
+        this.ctx.fillStyle = this._grainPattern;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.restore();
+    }
+
+    drawHoloGrid(gameState, launcher, profile) {
         // JUICE: Dynamic Holographic Grid
         const particleCount = gameState.particles ? gameState.particles.length : 0;
-        const gridSize = particleCount > 30 ? 80 : 50; // Coarser grid during chaos
+        const gridSize = particleCount > 30 ? profile.gridBase + 20 : profile.gridBase; // Coarser grid during chaos
         const time = Date.now();
         const pulse = Math.sin(time / 1000) * 0.5 + 0.5; // Slow heartbeat pulse
 
@@ -378,7 +495,7 @@ export class Renderer {
 
         // Skip expensive distortion when there are too many particles (chaos mode)
         // or when no shockwaves are active
-        const hasActiveShockwaves = particleCount <= 40 && gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
+        const hasActiveShockwaves = profile.allowGridDistortion && particleCount <= 40 && gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
 
         this.ctx.save();
 
@@ -906,7 +1023,7 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawComplexCrystal(c, colorOverride = null, particleCount = 0) {
+    drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high) {
         // JUICE: Apply stress shake to position
         const shakeX = c.shakeX || 0;
         const shakeY = c.shakeY || 0;
@@ -931,7 +1048,7 @@ export class Renderer {
         }
 
         // Perf: use solid fill instead of gradients when particle chaos is high
-        const useSolidFill = particleCount > 40;
+        const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
 
         // JUICE: Critical Danger Glow
         if (c.isCritical && !colorOverride) {
@@ -993,10 +1110,12 @@ export class Renderer {
                 this.ctx.fillStyle = fillColor;
             }
 
+            const useMultifacet = facetStyle === 'multifacet' && profile.crystalDetail === 'high';
+
             // Draw main crystal shape with more facets
             this.ctx.beginPath();
 
-            if (facetStyle === 'multifacet') {
+            if (useMultifacet) {
                 // Create a more complex, multi-faceted shape
                 const segments = 5;
                 const angleVariation = tilt / segments;
@@ -1051,7 +1170,7 @@ export class Renderer {
             this.ctx.stroke();
 
             // Enhanced internal facets with multiple layers
-            if (!colorOverride && c.flash < 0.5) {
+            if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low') {
                 // Primary highlight facet
                 this.ctx.fillStyle = 'rgba(255,255,255,0.3)';
                 this.ctx.beginPath();
@@ -1086,6 +1205,21 @@ export class Renderer {
                 this.ctx.lineTo(cx + halfW*0.3, baseY);
                 this.ctx.stroke();
                 this.ctx.lineWidth = baseLineWidth;
+            }
+
+            if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill) {
+                const sheen = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
+                sheen.addColorStop(0, 'rgba(255,255,255,0)');
+                sheen.addColorStop(0.35, 'rgba(180,255,255,0.18)');
+                sheen.addColorStop(0.6, 'rgba(255,160,255,0.16)');
+                sheen.addColorStop(1, 'rgba(255,255,255,0)');
+                this.ctx.fillStyle = sheen;
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx - halfW * 0.25, baseY);
+                this.ctx.lineTo(cx + tilt * 0.65, c.type === 'top' ? (baseY + (tipY - baseY) * 0.72) : (baseY - (baseY - tipY) * 0.72));
+                this.ctx.lineTo(cx + halfW * 0.25, baseY);
+                this.ctx.closePath();
+                this.ctx.fill();
             }
         };
 
