@@ -1,5 +1,12 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 
+const FILM_GRAIN_REFRESH_INTERVAL_MS = 90;
+const RENDER_QUALITY_PROFILES = {
+    high: { maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50, crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true },
+    medium: { maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65, crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false },
+    low: { maxDust: 55, maxParticles: 420, particleStride: 2, gridBase: 90, crystalDetail: 'low', postFX: false, lightShafts: false, fog: true, allowGridDistortion: false }
+};
+
 export class Renderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -27,11 +34,7 @@ export class Renderer {
         // Cache for vignette gradient (invalidated on resize)
         this._vignetteGradient = null;
         this._fogGradient = null;
-        this._qualityProfiles = {
-            high: { maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50, crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true },
-            medium: { maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65, crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false },
-            low: { maxDust: 55, maxParticles: 420, particleStride: 2, gridBase: 90, crystalDetail: 'low', postFX: false, lightShafts: false, fog: true, allowGridDistortion: false }
-        };
+        this._qualityProfiles = RENDER_QUALITY_PROFILES;
     }
 
     resize(w, h) {
@@ -457,7 +460,7 @@ export class Renderer {
             this._grainCanvas.height = 128;
             this._grainCtx = this._grainCanvas.getContext('2d');
         }
-        if (!this._lastGrainRefresh || now - this._lastGrainRefresh > 90) {
+        if (!this._lastGrainRefresh || now - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
             const img = this._grainCtx.createImageData(128, 128);
             for (let i = 0; i < img.data.length; i += 4) {
                 const v = Math.floor(Math.random() * 30);

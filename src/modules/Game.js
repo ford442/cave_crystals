@@ -5,6 +5,17 @@ import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
 
+const ADAPTIVE_QUALITY = {
+    autoLowFps: 50,
+    autoMediumFps: 57,
+    downgradeLowFps: 48,
+    downgradeMediumFps: 57,
+    upgradeFps: 59,
+    fpsSmoothingFactor: 0.25,
+    cooldownSlowMs: 2500,
+    cooldownFastMs: 2000
+};
+
 export class Game {
     constructor() {
         this.background = new Background();
@@ -708,9 +719,9 @@ export class Game {
         this.state.qualityMode = mode;
         if (mode === 'auto') {
             if (!this._smoothedFps) this._smoothedFps = 60;
-            if (this._smoothedFps < 50) {
+            if (this._smoothedFps < ADAPTIVE_QUALITY.autoLowFps) {
                 this.state.renderQuality = 'low';
-            } else if (this._smoothedFps < 57) {
+            } else if (this._smoothedFps < ADAPTIVE_QUALITY.autoMediumFps) {
                 this.state.renderQuality = 'medium';
             } else {
                 this.state.renderQuality = 'high';
@@ -722,22 +733,22 @@ export class Game {
 
     updateAdaptiveQuality(fps) {
         if (!this._smoothedFps) this._smoothedFps = fps;
-        this._smoothedFps += (fps - this._smoothedFps) * 0.25;
+        this._smoothedFps += (fps - this._smoothedFps) * ADAPTIVE_QUALITY.fpsSmoothingFactor;
         if (this.state.qualityMode !== 'auto') return;
 
         if (!this._qualityCooldownUntil) this._qualityCooldownUntil = 0;
         const now = performance.now();
         if (now < this._qualityCooldownUntil) return;
 
-        if (this._smoothedFps < 48 && this.state.renderQuality !== 'low') {
+        if (this._smoothedFps < ADAPTIVE_QUALITY.downgradeLowFps && this.state.renderQuality !== 'low') {
             this.state.renderQuality = 'low';
-            this._qualityCooldownUntil = now + 2500;
-        } else if (this._smoothedFps < 57 && this.state.renderQuality === 'high') {
+            this._qualityCooldownUntil = now + ADAPTIVE_QUALITY.cooldownSlowMs;
+        } else if (this._smoothedFps < ADAPTIVE_QUALITY.downgradeMediumFps && this.state.renderQuality === 'high') {
             this.state.renderQuality = 'medium';
-            this._qualityCooldownUntil = now + 2000;
-        } else if (this._smoothedFps > 59 && this.state.renderQuality !== 'high') {
+            this._qualityCooldownUntil = now + ADAPTIVE_QUALITY.cooldownFastMs;
+        } else if (this._smoothedFps > ADAPTIVE_QUALITY.upgradeFps && this.state.renderQuality !== 'high') {
             this.state.renderQuality = this.state.renderQuality === 'low' ? 'medium' : 'high';
-            this._qualityCooldownUntil = now + 2000;
+            this._qualityCooldownUntil = now + ADAPTIVE_QUALITY.cooldownFastMs;
         }
     }
 
