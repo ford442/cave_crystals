@@ -715,17 +715,21 @@ export class Game {
         return 1.0;
     }
 
+    resolveQualityForFps(fps, lowThreshold, mediumThreshold) {
+        if (fps < lowThreshold) return 'low';
+        if (fps < mediumThreshold) return 'medium';
+        return 'high';
+    }
+
     setQualityMode(mode = 'auto') {
         this.state.qualityMode = mode;
         if (mode === 'auto') {
             if (!this._smoothedFps) this._smoothedFps = 60;
-            if (this._smoothedFps < ADAPTIVE_QUALITY.autoLowFps) {
-                this.state.renderQuality = 'low';
-            } else if (this._smoothedFps < ADAPTIVE_QUALITY.autoMediumFps) {
-                this.state.renderQuality = 'medium';
-            } else {
-                this.state.renderQuality = 'high';
-            }
+            this.state.renderQuality = this.resolveQualityForFps(
+                this._smoothedFps,
+                ADAPTIVE_QUALITY.autoLowFps,
+                ADAPTIVE_QUALITY.autoMediumFps
+            );
             return;
         }
         this.state.renderQuality = mode;

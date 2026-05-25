@@ -1,6 +1,7 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 
 const FILM_GRAIN_REFRESH_INTERVAL_MS = 90;
+const EMERGENCY_PARTICLE_STRIDE_BOOST = 1;
 const RENDER_QUALITY_PROFILES = {
     high: { maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50, crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true },
     medium: { maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65, crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false },
@@ -179,7 +180,7 @@ export class Renderer {
         }
 
         const particleLimit = Math.min(profile.maxParticles, particleCount);
-        const stride = particleCount > profile.maxParticles ? profile.particleStride + 1 : profile.particleStride;
+        const stride = particleCount > profile.maxParticles ? profile.particleStride + EMERGENCY_PARTICLE_STRIDE_BOOST : profile.particleStride;
         for (let i = 0; i < particleLimit; i += stride) {
             const p = gameState.particles[i];
             if (p.isTrail) {
