@@ -35,6 +35,11 @@ export class Renderer {
         this._vignetteGradient = null;
         this._fogGradient = null;
         this._qualityProfiles = RENDER_QUALITY_PROFILES;
+        this._grainCanvas = document.createElement('canvas');
+        this._grainCanvas.width = 128;
+        this._grainCanvas.height = 128;
+        this._grainCtx = this._grainCanvas.getContext('2d');
+        this._grainPattern = null;
     }
 
     resize(w, h) {
@@ -454,12 +459,6 @@ export class Renderer {
 
     drawFilmGrain() {
         const now = Date.now();
-        if (!this._grainCanvas) {
-            this._grainCanvas = document.createElement('canvas');
-            this._grainCanvas.width = 128;
-            this._grainCanvas.height = 128;
-            this._grainCtx = this._grainCanvas.getContext('2d');
-        }
         if (!this._lastGrainRefresh || now - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
             const img = this._grainCtx.createImageData(128, 128);
             for (let i = 0; i < img.data.length; i += 4) {

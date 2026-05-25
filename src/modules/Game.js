@@ -151,7 +151,7 @@ export class Game {
         this.state.impactFlash = 0;
 
         // Spawn Atmospheric Dust
-        const dustCount = this.state.renderQuality === 'low' ? 45 : this.state.renderQuality === 'medium' ? 80 : 120;
+        const dustCount = this.renderer.getQualityProfile(this.state.renderQuality).maxDust;
         for (let i = 0; i < dustCount; i++) {
             const x = Math.random() * this.renderer.width;
             const y = Math.random() * this.renderer.height;
@@ -768,7 +768,7 @@ export class Game {
             const fps = Math.round((this._fpsFrames * 1000) / (timestamp - this._fpsLastTime));
             this.updateAdaptiveQuality(fps);
             if (this.ui.fps) {
-                const qualityLabel = this.state.qualityMode === 'auto' ? `${this.state.renderQuality.toUpperCase()} AUTO` : this.state.renderQuality.toUpperCase();
+                const qualityLabel = this.state.renderQuality.toUpperCase() + (this.state.qualityMode === 'auto' ? ' AUTO' : '');
                 this.ui.fps.textContent = `${fps} FPS · ${qualityLabel}`;
             }
             this._fpsFrames = 0;
