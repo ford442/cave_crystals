@@ -103,6 +103,22 @@ export class Spore {
         this.active = true;
         this.spawnTime = Date.now(); // For elastic animation
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
+
+        // Pre-generate lightning arcs so draw loop doesn't call Math.random()
+        this.lightningArcs = [];
+        const numArcs = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < numArcs; i++) {
+            const arc = {
+                angle: Math.random() * Math.PI * 2,
+                lenRatio: 1.5 + Math.random() * 0.8,
+                jaggedOffsets: []
+            };
+            const steps = 4;
+            for (let j = 0; j < steps; j++) {
+                arc.jaggedOffsets.push(Math.random() - 0.5);
+            }
+            this.lightningArcs.push(arc);
+        }
     }
 
     update(topCry, botCry, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
@@ -639,25 +655,7 @@ export class DustParticle {
         this.vx += (this.baseVx - this.vx) * drag;
         this.vy += (this.baseVy - this.vy) * drag;
 
-        // Shockwave Interaction
-        if (shockwaves && shockwaves.length > 0) {
-            for (let si = 0; si < shockwaves.length; si++) {
-                const sw = shockwaves[si];
-                if (sw.life <= 0) continue;
-
-                const dx = this.x - sw.x;
-                const dy = this.y - sw.y;
-                const distSq = dx*dx + dy*dy;
-                const radius = sw.radius + 100;
-                const radiusSq = radius * radius;
-
-                if (distSq < radiusSq && distSq > 0) {
-                    const dist = Math.sqrt(distSq);
-                    const force = (1.0 - (dist / radius)) * 2.0 * sw.life;
-                    this.vx += (dx / dist) * force * timeScale;
-                    this.vy += (dy / dist) * force * timeScale;
-                }
-            }
-        }
+        // Dust is atmospheric background fluff — no shockwave interaction
+        // (Removed O(dust * shockwaves) loop that tanked framerate)
     }
 }

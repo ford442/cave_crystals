@@ -19,6 +19,13 @@ export class Renderer {
 
         // Cache scanline pattern once
         this.scanlinePattern = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
+
+        // Cache for glitch rects (regenerated only when intensity changes)
+        this._glitchRects = [];
+        this._glitchIntensity = -1;
+
+        // Cache for vignette gradient (invalidated on resize)
+        this._vignetteGradient = null;
     }
 
     resize(w, h) {
@@ -27,6 +34,7 @@ export class Renderer {
         this.canvas.width = w;
         this.canvas.height = h;
         this.laneWidth = w / GAME_CONFIG.lanes;
+        this._vignetteGradient = null; // invalidate cached gradient
     }
 
     clear() {
@@ -112,7 +120,7 @@ export class Renderer {
              this.ctx.translate(distortion.x, distortion.y);
 
              // Only apply chromatic aberration to launcher, not crystals
-             this.drawComplexCrystal(c);
+             this.drawComplexCrystal(c, null, particleCount);
              this.ctx.restore();
         });
 
@@ -192,15 +200,21 @@ export class Renderer {
         const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
         const alpha = intensity * 0.6 * pulse; // Max 0.6 opacity
 
-        // Radial gradient from center out
-        // Use larger dimension for radius to ensure coverage
-        const radius = Math.max(this.width, this.height);
-        const grad = this.ctx.createRadialGradient(this.width / 2, this.height / 2, this.height * 0.2, this.width / 2, this.height / 2, radius * 0.8);
-        grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
-        grad.addColorStop(1, `rgba(255, 0, 0, ${alpha})`);
+        // Cache gradient shape; modulate opacity via globalAlpha
+        if (!this._vignetteGradient) {
+            const radius = Math.max(this.width, this.height);
+            this._vignetteGradient = this.ctx.createRadialGradient(
+                this.width / 2, this.height / 2, this.height * 0.2,
+                this.width / 2, this.height / 2, radius * 0.8
+            );
+            this._vignetteGradient.addColorStop(0, 'rgba(255, 0, 0, 0)');
+            this._vignetteGradient.addColorStop(1, 'rgba(255, 0, 0, 1)');
+        }
 
-        this.ctx.fillStyle = grad;
+        this.ctx.globalAlpha = alpha;
+        this.ctx.fillStyle = this._vignetteGradient;
         this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.globalAlpha = 1.0;
 
         // Add "Danger" text if intensity is very high
         if (intensity > 0.8 && pulse > 0.8) {
@@ -304,15 +318,20 @@ export class Renderer {
              });
         }
 
-        // 5. Particle Sparkles (Only large ones or groups to save perf)
-        // We can batch draw a faint glow for particles?
-        // Or just skip for performance as there can be many.
-        // Let's do a simple iterate for large particles only
-        gameState.particles.forEach(p => {
-             if (p.size > 4) {
-                 drawLight(p.x, p.y, p.color, p.size * 4, 0.3 * p.life);
-             }
-        });
+        // 5. Particle Sparkles — capped hard to save perf
+        // Skip entirely if there are too many particles (chaos mode)
+        const particleCount = gameState.particles ? gameState.particles.length : 0;
+        if (particleCount <= 50) {
+            let litCount = 0;
+            const maxLit = 15;
+            for (let i = 0; i < particleCount && litCount < maxLit; i++) {
+                const p = gameState.particles[i];
+                if (p.size > 4) {
+                    drawLight(p.x, p.y, p.color, p.size * 4, 0.3 * p.life);
+                    litCount++;
+                }
+            }
+        }
 
         this.ctx.globalCompositeOperation = 'source-over';
     }
@@ -357,8 +376,9 @@ export class Renderer {
         const activeLane = launcher ? launcher.targetLane : -1;
         const activeX = (activeLane * this.laneWidth) + (this.laneWidth / 2);
 
-        // Only calculate shockwave distortion when shockwaves exist
-        const hasActiveShockwaves = gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
+        // Skip expensive distortion when there are too many particles (chaos mode)
+        // or when no shockwaves are active
+        const hasActiveShockwaves = particleCount <= 40 && gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
 
         this.ctx.save();
 
@@ -367,39 +387,14 @@ export class Renderer {
         const cy = this.height / 2;
         const breatheScale = 0.01 * pulse;
 
-        // Inline shockwave distortion to avoid function call + object alloc
-        const getDistortion = (x, y) => {
-             let dx = 0, dy = 0;
-             for (let si = 0; si < gameState.shockwaves.length; si++) {
-                 const sw = gameState.shockwaves[si];
-                 if (sw.life <= 0) continue;
-                 const sdx = x - sw.x;
-                 const sdy = y - sw.y;
-                 const distSq = sdx*sdx + sdy*sdy;
-                 const band = 50;
-                 const delta = Math.sqrt(distSq) - sw.radius;
-                 if (Math.abs(delta) < band && distSq > 0) {
-                     const t = delta / band;
-                     const strength = Math.cos(t * Math.PI / 2);
-                     const force = 15.0 * strength * sw.life;
-                     const dist = Math.sqrt(distSq);
-                     dx += (sdx / dist) * force;
-                     dy += (sdy / dist) * force;
-                 }
-             }
-             return { x: dx, y: dy };
-         };
-
         // Horizontal Lines
         for (let y = 0; y <= this.height; y += gridSize) {
              this.ctx.beginPath();
-             // Draw line segments so they can curve
              let start = true;
              for (let x = 0; x <= this.width; x += gridSize) {
-                 // Calculate distortion at this vertex
                  let distX = 0, distY = 0;
                  if (hasActiveShockwaves) {
-                     const dist = getDistortion(x, y);
+                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
                      distX = dist.x;
                      distY = dist.y;
                  }
@@ -422,7 +417,6 @@ export class Renderer {
 
         // Vertical Lines
         for (let x = 0; x <= this.width; x += gridSize) {
-             // Check if this vertical line is near active lane
              const distToActive = Math.abs(x - activeX);
              let isNearActive = false;
              if (activeLane >= 0 && distToActive < this.laneWidth / 2) {
@@ -445,7 +439,7 @@ export class Renderer {
              for (let y = 0; y <= this.height; y += gridSize) {
                  let distX = 0, distY = 0;
                  if (hasActiveShockwaves) {
-                     const dist = getDistortion(x, y);
+                     const dist = this.calculateShockwaveDistortion(x, y, gameState);
                      distX = dist.x;
                      distY = dist.y;
                  }
@@ -475,8 +469,13 @@ export class Renderer {
         const targetLane = launcher.targetLane;
         const targetLaneX = (targetLane * this.laneWidth) + (this.laneWidth / 2);
 
-        // Find target crystals
-        const targets = gameState.crystals.filter(c => c.lane === targetLane);
+        // Find target crystals (inline to avoid array allocation)
+        const targets = [];
+        for (let i = 0; i < gameState.crystals.length; i++) {
+            if (gameState.crystals[i].lane === targetLane) {
+                targets.push(gameState.crystals[i]);
+            }
+        }
         const nextColorIdx = gameState.nextSporeColorIdx;
         const time = Date.now();
 
@@ -728,30 +727,28 @@ export class Renderer {
         this.ctx.fill();
 
         // JUICE: Lightning Arcs
-        // Randomly generate arcs
+        // Use pre-generated arcs from spore (no Math.random in draw loop)
         this.ctx.strokeStyle = '#fff';
         this.ctx.lineWidth = 2;
         this.ctx.lineCap = 'round';
         this.ctx.shadowBlur = 10;
         this.ctx.shadowColor = '#fff';
 
-        // Chaotic lightning
-        const numArcs = 2 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < numArcs; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const len = baseRadius * (1.5 + Math.random() * 0.8);
+        for (let i = 0; i < s.lightningArcs.length; i++) {
+            const arc = s.lightningArcs[i];
+            const len = baseRadius * arc.lenRatio;
 
             this.ctx.save();
-            this.ctx.rotate(angle);
+            this.ctx.rotate(arc.angle);
             this.ctx.beginPath();
             this.ctx.moveTo(0, 0);
 
-            // Jagged line
+            // Jagged line using pre-generated offsets
             let r = baseRadius * 0.5;
             const step = len / 4;
-            while(r < len) {
+            for (let j = 0; j < arc.jaggedOffsets.length && r < len; j++) {
                 r += step;
-                const offset = (Math.random() - 0.5) * (baseRadius * 0.8);
+                const offset = arc.jaggedOffsets[j] * (baseRadius * 0.8);
                 this.ctx.lineTo(r, offset);
             }
             this.ctx.stroke();
@@ -909,7 +906,7 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawComplexCrystal(c, colorOverride = null) {
+    drawComplexCrystal(c, colorOverride = null, particleCount = 0) {
         // JUICE: Apply stress shake to position
         const shakeX = c.shakeX || 0;
         const shakeY = c.shakeY || 0;
@@ -932,6 +929,9 @@ export class Renderer {
             fillColor = 'rgba(0, 255, 255, 0.7)';
             strokeColor = 'rgba(0, 255, 255, 0.7)';
         }
+
+        // Perf: use solid fill instead of gradients when particle chaos is high
+        const useSolidFill = particleCount > 40;
 
         // JUICE: Critical Danger Glow
         if (c.isCritical && !colorOverride) {
@@ -970,20 +970,25 @@ export class Renderer {
             const cx = xCenter + offsetX;
 
             if (!colorOverride) {
-                // Enhanced gradient with more depth
-                const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
-                if (c.flash > 0) {
-                     grad.addColorStop(0, '#fff');
-                     grad.addColorStop(0.5, '#fff');
-                     grad.addColorStop(1, '#fff');
+                if (useSolidFill) {
+                    // Perf: skip expensive gradient creation under load
+                    this.ctx.fillStyle = c.flash > 0 ? '#fff' : col.hex;
                 } else {
-                     // More vibrant color gradient
-                     grad.addColorStop(0, col.hex);
-                     grad.addColorStop(0.4, col.hex);
-                     grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
-                     grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+                    // Enhanced gradient with more depth
+                    const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
+                    if (c.flash > 0) {
+                         grad.addColorStop(0, '#fff');
+                         grad.addColorStop(0.5, '#fff');
+                         grad.addColorStop(1, '#fff');
+                    } else {
+                         // More vibrant color gradient
+                         grad.addColorStop(0, col.hex);
+                         grad.addColorStop(0.4, col.hex);
+                         grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
+                         grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+                    }
+                    this.ctx.fillStyle = grad;
                 }
-                this.ctx.fillStyle = grad;
             } else {
                 this.ctx.fillStyle = fillColor;
             }
@@ -1169,20 +1174,40 @@ export class Renderer {
 
     drawGlitch(intensity) {
         if (!this.ctx) return;
-        // Number of glitches scales with intensity
         const numGlitches = Math.floor(intensity * 10);
+
+        // Regenerate rects only when intensity changes significantly or count changes
+        if (Math.abs(intensity - this._glitchIntensity) > 0.05 || this._glitchRects.length !== numGlitches) {
+            this._glitchIntensity = intensity;
+            this._glitchRects = [];
+            for (let i = 0; i < numGlitches; i++) {
+                this._glitchRects.push({
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    w: Math.random() * 200 + 50,
+                    h: Math.random() * 30 + 5,
+                    color: Math.random() > 0.5 ? 'rgba(0, 255, 255, 0.5)' : 'rgba(255, 0, 255, 0.5)',
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4
+                });
+            }
+        }
+
         this.ctx.save();
-        this.ctx.globalCompositeOperation = 'exclusion'; // Inverts colors for "digital corruption" look
+        this.ctx.globalCompositeOperation = 'exclusion';
 
-        for (let i = 0; i < numGlitches; i++) {
-            const x = Math.random() * this.width;
-            const y = Math.random() * this.height;
-            const w = Math.random() * 200 + 50;
-            const h = Math.random() * 30 + 5;
+        for (let i = 0; i < this._glitchRects.length; i++) {
+            const r = this._glitchRects[i];
+            // Animate with pre-set drift (no Math.random in hot path)
+            r.x += r.vx;
+            r.y += r.vy;
+            if (r.x < -r.w) r.x += this.width + r.w;
+            if (r.x > this.width) r.x -= this.width + r.w;
+            if (r.y < -r.h) r.y += this.height + r.h;
+            if (r.y > this.height) r.y -= this.height + r.h;
 
-            // Randomly choose cyan or magenta for that chromatic aberration feel
-            this.ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0, 255, 255, 0.5)' : 'rgba(255, 0, 255, 0.5)';
-            this.ctx.fillRect(x, y, w, h);
+            this.ctx.fillStyle = r.color;
+            this.ctx.fillRect(r.x, r.y, r.w, r.h);
         }
         this.ctx.restore();
     }
@@ -1192,41 +1217,37 @@ export class Renderer {
 
         let dx = 0;
         let dy = 0;
+        const bandWidth = 50;
 
-        gameState.shockwaves.forEach(sw => {
-            // Only affect if shockwave is strong/active
-            if (sw.life <= 0) return;
+        for (let i = 0; i < gameState.shockwaves.length; i++) {
+            const sw = gameState.shockwaves[i];
+            if (sw.life <= 0) continue;
 
             const distX = x - sw.x;
             const distY = y - sw.y;
-            const dist = Math.sqrt(distX * distX + distY * distY);
+            const distSq = distX * distX + distY * distY;
+            const outer = sw.radius + bandWidth;
 
-            // Check if point is near the shockwave ring
-            // The ring expands. We distort things near the radius.
-            // Width of distortion band:
-            const bandWidth = 50;
-            const delta = dist - sw.radius;
+            // Fast reject: if outside outer band, skip sqrt entirely
+            if (distSq > outer * outer) continue;
 
-            if (Math.abs(delta) < bandWidth) {
-                // We are inside the distortion band
-                // Normalized position in band (-1 to 1)
-                const t = delta / bandWidth;
-
-                // Distortion curve: simple sine hump
-                // At t=0 (on the ring), distortion is max.
-                // At t=1 or -1, distortion is 0.
-                const strength = Math.cos(t * Math.PI / 2);
-
-                // Displacement force
-                // Push AWAY from center
-                const force = 15.0 * strength * sw.life; // Scale by life
-
-                if (dist > 0) {
-                    dx += (distX / dist) * force;
-                    dy += (distY / dist) * force;
-                }
+            // Fast reject: if inside inner band (hole), skip
+            if (sw.radius > bandWidth) {
+                const inner = sw.radius - bandWidth;
+                if (distSq < inner * inner) continue;
             }
-        });
+
+            const dist = Math.sqrt(distSq);
+            const delta = dist - sw.radius;
+            const t = delta / bandWidth;
+            const strength = Math.cos(t * Math.PI / 2);
+            const force = 15.0 * strength * sw.life;
+
+            if (dist > 0) {
+                dx += (distX / dist) * force;
+                dy += (distY / dist) * force;
+            }
+        }
 
         return { x: dx, y: dy };
     }

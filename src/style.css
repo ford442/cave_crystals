@@ -156,3 +156,15 @@ button:active {
     box-shadow: 0 0 20px currentColor;
     border: 2px solid rgba(255,255,255,0.5);
 }
+
+#fpsCounter {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    color: rgba(0, 255, 0, 0.7);
+    font-family: monospace;
+    font-size: 14px;
+    pointer-events: none;
+    z-index: 100;
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}

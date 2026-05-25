@@ -20,7 +20,8 @@ export class Game {
             level: document.getElementById('levelVal'),
             preview: document.getElementById('nextSporePreview'),
             startBtn: document.getElementById('startBtn'),
-            restartBtn: document.getElementById('restartBtn')
+            restartBtn: document.getElementById('restartBtn'),
+            fps: document.getElementById('fpsCounter')
         };
 
         this.state = {
@@ -693,6 +694,17 @@ export class Game {
 
         // Cap dt to prevent huge jumps if tab was inactive
         if (dt > 100) dt = 100;
+
+        // FPS Counter
+        if (!this._fpsLastTime) this._fpsLastTime = timestamp;
+        if (!this._fpsFrames) this._fpsFrames = 0;
+        this._fpsFrames++;
+        if (timestamp - this._fpsLastTime >= 1000) {
+            const fps = Math.round((this._fpsFrames * 1000) / (timestamp - this._fpsLastTime));
+            if (this.ui.fps) this.ui.fps.textContent = fps + ' FPS';
+            this._fpsFrames = 0;
+            this._fpsLastTime = timestamp;
+        }
 
         // Impact Sleep (Hit Stop)
         if (this.state.sleepTimer > 0) {
