@@ -103,6 +103,25 @@ p {
     color: #ddd;
 }
 
+#qualityControl {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #dff;
+    font-size: 1rem;
+}
+
+#qualitySelect {
+    pointer-events: auto;
+    background: rgba(5, 15, 30, 0.85);
+    color: #bff;
+    border: 1px solid rgba(120, 220, 255, 0.6);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-family: 'Righteous', cursive;
+}
+
 button {
     margin-top: 30px;
     padding: 15px 40px;
