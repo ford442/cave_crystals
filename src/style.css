@@ -50,7 +50,6 @@ canvas {
     justify-content: space-between;
     padding: 20px;
     box-sizing: border-box;
-    background-color: rgba(0, 0, 0, 0.3);
     z-index: 5;
 }
 

@@ -61,7 +61,7 @@ export class Renderer {
         return this._qualityProfiles[quality] || this._qualityProfiles.high;
     }
 
-    draw(gameState, launcher) {
+    draw(gameState, launcher, timestamp = performance.now()) {
         if (!this.ctx) return;
         const profile = this.getQualityProfile(gameState.renderQuality);
 
@@ -71,9 +71,7 @@ export class Renderer {
         this.ctx.fillRect(0, 0, this.width, this.height);
 
         // 2. Render Additive Lighting Pass
-        this.ctx.save();
-        this.drawLighting(gameState, launcher, profile);
-        this.ctx.restore();
+        this.drawLighting(gameState, launcher, profile, timestamp);
 
         // Background Color Override based on Flash
         if (gameState.impactFlash > 0.3) {
@@ -126,11 +124,11 @@ export class Renderer {
         }
 
         if (profile.fog) {
-            this.drawVolumetricFog(gameState, profile);
+            this.drawVolumetricFog(gameState, profile, timestamp);
         }
 
-        this.drawHoloGrid(gameState, launcher, profile);
-        this.drawTargetingSystem(gameState, launcher);
+        this.drawHoloGrid(gameState, launcher, profile, timestamp);
+        this.drawTargetingSystem(gameState, launcher, timestamp);
 
         // Draw Crystals (skip chromatic aberration on crystals during explosions)
         for (let i = 0; i < gameState.crystals.length; i++) {
@@ -141,12 +139,16 @@ export class Renderer {
              const cY = c.type === 'top' ? c.height / 2 : this.height - (c.height / 2);
              const distortion = this.calculateShockwaveDistortion(cX, cY, gameState);
 
-             this.ctx.save();
-             this.ctx.translate(distortion.x, distortion.y);
+             if (distortion.x !== 0 || distortion.y !== 0) {
+                 this.ctx.save();
+                 this.ctx.translate(distortion.x, distortion.y);
+             }
 
              // Only apply chromatic aberration to launcher, not crystals
-             this.drawComplexCrystal(c, null, particleCount, profile);
-             this.ctx.restore();
+             this.drawComplexCrystal(c, null, particleCount, profile, timestamp);
+             if (distortion.x !== 0 || distortion.y !== 0) {
+                 this.ctx.restore();
+             }
         }
 
         // Draw Launcher with Chromatic Aberration (Motion Blur)
@@ -176,7 +178,7 @@ export class Renderer {
             this.ctx.restore();
         }
         for (let i = 0; i < gameState.spores.length; i++) {
-            this.drawSpore(gameState.spores[i]);
+            this.drawSpore(gameState.spores[i], timestamp);
         }
 
         const particleLimit = Math.min(profile.maxParticles, particleCount);
@@ -184,27 +186,37 @@ export class Renderer {
         for (let i = 0; i < particleLimit; i += stride) {
             const p = gameState.particles[i];
             if (p.isTrail) {
-               this.drawTrailParticle(p);
+                const s = p.size;
+                if (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height) continue;
+                this.drawTrailParticle(p);
             } else {
-               this.drawParticle(p);
+                const s = p.size * (p.life / p.maxLife);
+                if (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height) continue;
+                this.drawParticle(p);
             }
         }
 
         if (gameState.shockwaves) {
             for (let i = 0; i < gameState.shockwaves.length; i++) {
-               this.drawShockwave(gameState.shockwaves[i]);
+               const sw = gameState.shockwaves[i];
+               if (sw.x + sw.radius < 0 || sw.x - sw.radius > this.width || sw.y + sw.radius < 0 || sw.y - sw.radius > this.height) continue;
+               this.drawShockwave(sw);
             }
         }
 
         if (gameState.floatingTexts) {
             for (let i = 0; i < gameState.floatingTexts.length; i++) {
-               this.drawFloatingText(gameState.floatingTexts[i]);
+               const ft = gameState.floatingTexts[i];
+               if (ft.y + 40 < 0 || ft.y - 40 > this.height) continue;
+               this.drawFloatingText(ft);
             }
         }
 
         if (gameState.soulParticles) {
             for (let i = 0; i < gameState.soulParticles.length; i++) {
-               this.drawSoulParticle(gameState.soulParticles[i]);
+               const sp = gameState.soulParticles[i];
+               if (sp.x + sp.size < 0 || sp.x - sp.size > this.width || sp.y + sp.size < 0 || sp.y - sp.size > this.height) continue;
+               this.drawSoulParticle(sp);
             }
         }
 
@@ -220,7 +232,7 @@ export class Renderer {
 
         // JUICE: Red Alert Vignette
         if (gameState.criticalIntensity > 0.01) {
-            this.drawVignette(gameState.criticalIntensity);
+            this.drawVignette(gameState.criticalIntensity, timestamp);
         }
 
         // Draw Impact Flash (independent of shake translation)
@@ -232,16 +244,15 @@ export class Renderer {
             this.drawLightShafts(gameState, launcher);
         }
         if (profile.postFX) {
-            this.drawFilmGrain();
+            this.drawFilmGrain(timestamp);
         }
     }
 
-    drawVignette(intensity) {
+    drawVignette(intensity, timestamp) {
         if (!this.ctx) return;
-        this.ctx.save();
 
         // Pulse alpha
-        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        const pulse = 0.5 + 0.5 * Math.sin(timestamp / 200);
         const alpha = intensity * 0.6 * pulse; // Max 0.6 opacity
 
         // Cache gradient shape; modulate opacity via globalAlpha
@@ -255,27 +266,36 @@ export class Renderer {
             this._vignetteGradient.addColorStop(1, 'rgba(255, 0, 0, 1)');
         }
 
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFillStyle = this.ctx.fillStyle;
         this.ctx.globalAlpha = alpha;
         this.ctx.fillStyle = this._vignetteGradient;
         this.ctx.fillRect(0, 0, this.width, this.height);
-        this.ctx.globalAlpha = 1.0;
+        this.ctx.globalAlpha = prevAlpha;
 
         // Add "Danger" text if intensity is very high
         if (intensity > 0.8 && pulse > 0.8) {
+             const prevFont = this.ctx.font;
+             const prevTextAlign = this.ctx.textAlign;
+             const prevTextBaseline = this.ctx.textBaseline;
              this.ctx.font = 'bold 60px Righteous, monospace';
              this.ctx.fillStyle = `rgba(255, 0, 0, ${intensity})`;
              this.ctx.textAlign = 'center';
              this.ctx.textBaseline = 'middle';
              this.ctx.fillText("CRITICAL!", this.width / 2, this.height * 0.3);
+             this.ctx.font = prevFont;
+             this.ctx.textAlign = prevTextAlign;
+             this.ctx.textBaseline = prevTextBaseline;
+             this.ctx.fillStyle = prevFillStyle;
+        } else {
+            this.ctx.fillStyle = prevFillStyle;
         }
-
-        this.ctx.restore();
     }
 
-    drawLighting(gameState, launcher, profile) {
+    drawLighting(gameState, launcher, profile, timestamp) {
         this.ctx.globalCompositeOperation = 'lighter';
 
-        const time = Date.now() / 1000;
+        const time = timestamp / 1000;
 
         // Helper to draw a light blob with cached gradients
         const drawLight = (x, y, color, radius, intensity = 1.0) => {
@@ -326,19 +346,15 @@ export class Renderer {
              // If in first lane, reflect on left wall
              if (profile.crystalDetail !== 'low' && c.lane === 0) {
                  // Squeeze the light vertically against the wall
-                 this.ctx.save();
-                 this.ctx.translate(0, y);
-                 this.ctx.scale(0.3, 2.0); // Make it a vertical strip
+                 this.ctx.setTransform(0.3, 0, 0, 2.0, 0, y);
                  drawLight(0, 0, col, radius * 1.5, intensity * 0.5);
-                 this.ctx.restore();
+                 this.ctx.setTransform(1, 0, 0, 1, 0, 0);
              }
              // If in last lane, reflect on right wall
              if (profile.crystalDetail !== 'low' && c.lane === GAME_CONFIG.lanes - 1) {
-                 this.ctx.save();
-                 this.ctx.translate(this.width, y);
-                 this.ctx.scale(0.3, 2.0);
+                 this.ctx.setTransform(0.3, 0, 0, 2.0, this.width, y);
                  drawLight(0, 0, col, radius * 1.5, intensity * 0.5);
-                 this.ctx.restore();
+                 this.ctx.setTransform(1, 0, 0, 1, 0, 0);
              }
         });
 
@@ -382,7 +398,7 @@ export class Renderer {
 
     drawDust(particles, maxCount = 100) {
         if (!particles) return;
-        this.ctx.save();
+        const prevFillStyle = this.ctx.fillStyle;
         // Faint blue-ish white for dust
         this.ctx.fillStyle = 'rgb(200, 220, 255)';
         const count = Math.min(particles.length, maxCount);
@@ -394,20 +410,24 @@ export class Renderer {
              this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
              this.ctx.fill();
         }
-        this.ctx.restore();
+        this.ctx.globalAlpha = 1.0;
+        this.ctx.fillStyle = prevFillStyle;
     }
 
     drawImpactFlash(intensity, color = '#fff') {
-        this.ctx.save();
-        // Use 'lighter' or just alpha blend
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFillStyle = this.ctx.fillStyle;
         this.ctx.globalCompositeOperation = 'lighter';
         this.ctx.fillStyle = color;
         this.ctx.globalAlpha = intensity;
         this.ctx.fillRect(0, 0, this.width, this.height);
-        this.ctx.restore();
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.fillStyle = prevFillStyle;
     }
 
-    drawVolumetricFog(gameState, profile) {
+    drawVolumetricFog(gameState, profile, timestamp) {
         if (!this._fogGradient) {
             this._fogGradient = this.ctx.createLinearGradient(0, 0, 0, this.height);
             this._fogGradient.addColorStop(0, 'rgba(70, 95, 130, 0.22)');
@@ -415,16 +435,18 @@ export class Renderer {
             this._fogGradient.addColorStop(1, 'rgba(5, 15, 28, 0.32)');
         }
 
-        this.ctx.save();
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevFillStyle = this.ctx.fillStyle;
         this.ctx.fillStyle = this._fogGradient;
         this.ctx.fillRect(0, 0, this.width, this.height);
 
-        const pulse = 0.04 + Math.sin(Date.now() / 1600) * 0.02;
+        const pulse = 0.04 + Math.sin(timestamp / 1600) * 0.02;
         this.ctx.globalAlpha = Math.max(0.02, pulse);
         this.ctx.globalCompositeOperation = 'screen';
         const sweeps = profile.crystalDetail === 'high' ? 3 : 1;
         for (let i = 0; i < sweeps; i++) {
-            const x = ((Date.now() * 0.01) + (i * this.width * 0.35)) % (this.width + 240) - 120;
+            const x = ((timestamp * 0.01) + (i * this.width * 0.35)) % (this.width + 240) - 120;
             const grad = this.ctx.createLinearGradient(x, 0, x + 160, this.height);
             grad.addColorStop(0, 'rgba(255,255,255,0)');
             grad.addColorStop(0.5, 'rgba(170,220,255,0.32)');
@@ -432,7 +454,9 @@ export class Renderer {
             this.ctx.fillStyle = grad;
             this.ctx.fillRect(x - 120, 0, 240, this.height);
         }
-        this.ctx.restore();
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.fillStyle = prevFillStyle;
     }
 
     drawLightShafts(gameState, launcher) {
@@ -458,9 +482,8 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawFilmGrain() {
-        const now = Date.now();
-        if (!this._lastGrainRefresh || now - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
+    drawFilmGrain(timestamp) {
+        if (!this._lastGrainRefresh || timestamp - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
             const img = this._grainCtx.createImageData(128, 128);
             for (let i = 0; i < img.data.length; i += 4) {
                 const v = Math.floor(Math.random() * 30);
@@ -471,21 +494,25 @@ export class Renderer {
             }
             this._grainCtx.putImageData(img, 0, 0);
             this._grainPattern = this.ctx.createPattern(this._grainCanvas, 'repeat');
-            this._lastGrainRefresh = now;
+            this._lastGrainRefresh = timestamp;
         }
-        this.ctx.save();
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFillStyle = this.ctx.fillStyle;
         this.ctx.globalCompositeOperation = 'overlay';
         this.ctx.globalAlpha = 0.12;
         this.ctx.fillStyle = this._grainPattern;
         this.ctx.fillRect(0, 0, this.width, this.height);
-        this.ctx.restore();
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.fillStyle = prevFillStyle;
     }
 
-    drawHoloGrid(gameState, launcher, profile) {
+    drawHoloGrid(gameState, launcher, profile, timestamp) {
         // JUICE: Dynamic Holographic Grid
         const particleCount = gameState.particles ? gameState.particles.length : 0;
         const gridSize = particleCount > 30 ? profile.gridBase + 20 : profile.gridBase; // Coarser grid during chaos
-        const time = Date.now();
+        const time = timestamp;
         const pulse = Math.sin(time / 1000) * 0.5 + 0.5; // Slow heartbeat pulse
 
         // Setup base grid style
@@ -500,12 +527,14 @@ export class Renderer {
         // or when no shockwaves are active
         const hasActiveShockwaves = profile.allowGridDistortion && particleCount <= 40 && gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
 
-        this.ctx.save();
-
         // Precompute breathe constants
         const cx = this.width / 2;
         const cy = this.height / 2;
         const breatheScale = 0.01 * pulse;
+        const prevLineWidth = this.ctx.lineWidth;
+        const prevStrokeStyle = this.ctx.strokeStyle;
+        const prevShadowBlur = this.ctx.shadowBlur;
+        const prevShadowColor = this.ctx.shadowColor;
 
         // Horizontal Lines
         for (let y = 0; y <= this.height; y += gridSize) {
@@ -580,10 +609,13 @@ export class Renderer {
              this.ctx.stroke();
         }
 
-        this.ctx.restore();
+        this.ctx.lineWidth = prevLineWidth;
+        this.ctx.strokeStyle = prevStrokeStyle;
+        this.ctx.shadowBlur = prevShadowBlur;
+        this.ctx.shadowColor = prevShadowColor;
     }
 
-    drawTargetingSystem(gameState, launcher) {
+    drawTargetingSystem(gameState, launcher, timestamp) {
         if (!gameState.active || !launcher) return;
 
         const targetLane = launcher.targetLane;
@@ -597,14 +629,17 @@ export class Renderer {
             }
         }
         const nextColorIdx = gameState.nextSporeColorIdx;
-        const time = Date.now();
+        const time = timestamp;
 
         // Draw Laser Sight
         // Determine "Lock Status" based on if any crystal matches
         const hasMatch = targets.some(c => c.colorIdx === nextColorIdx);
 
-        this.ctx.save();
-
+        const prevLineWidth = this.ctx.lineWidth;
+        const prevStrokeStyle = this.ctx.strokeStyle;
+        const prevShadowBlur = this.ctx.shadowBlur;
+        const prevShadowColor = this.ctx.shadowColor;
+        const prevGlobalAlpha = this.ctx.globalAlpha;
         const beamX = targetLaneX;
 
         if (hasMatch) {
@@ -649,8 +684,7 @@ export class Renderer {
                  tipY = this.height - c.height + shakeY;
              }
 
-             this.ctx.save();
-             this.ctx.translate(cX + shakeX, tipY);
+             this.ctx.setTransform(1, 0, 0, 1, cX + shakeX, tipY);
 
              // Reticle Animation
              if (isMatch) {
@@ -692,12 +726,9 @@ export class Renderer {
                  this.ctx.stroke();
              }
 
-             this.ctx.restore();
+             this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
              // Connecting Line from Launcher to Target Tip
-             // Only draw if active match or maybe always?
-             // Let's draw it faint if no match, strong if match
-             this.ctx.save();
              this.ctx.beginPath();
              this.ctx.moveTo(launcher.x, launcher.y); // Start at actual launcher pos
              this.ctx.lineTo(cX + shakeX, tipY);
@@ -711,10 +742,13 @@ export class Renderer {
                  this.ctx.lineWidth = 1;
              }
              this.ctx.stroke();
-             this.ctx.restore();
         });
 
-        this.ctx.restore();
+        this.ctx.lineWidth = prevLineWidth;
+        this.ctx.strokeStyle = prevStrokeStyle;
+        this.ctx.shadowBlur = prevShadowBlur;
+        this.ctx.shadowColor = prevShadowColor;
+        this.ctx.globalAlpha = prevGlobalAlpha;
     }
 
     drawCursor(gameState, launcher, colorOverride = null) {
@@ -786,9 +820,9 @@ export class Renderer {
         this.ctx.restore();
     }
 
-    drawSpore(s) {
+    drawSpore(s, timestamp) {
         const col = COLORS[s.colorIdx];
-        const time = Date.now();
+        const time = timestamp;
 
         // Elastic spawn scale
         let scale = 1.0;
@@ -880,7 +914,10 @@ export class Renderer {
     }
 
     drawShockwave(sw) {
-        this.ctx.save();
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevLineWidth = this.ctx.lineWidth;
+        const prevStrokeStyle = this.ctx.strokeStyle;
         this.ctx.globalAlpha = Math.max(0, sw.life);
 
         // JUICE: Fancy Shockwave with composite effect
@@ -902,43 +939,34 @@ export class Renderer {
              this.ctx.stroke();
         }
 
-        this.ctx.restore();
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.lineWidth = prevLineWidth;
+        this.ctx.strokeStyle = prevStrokeStyle;
     }
 
     drawParticle(p) {
         const alpha = p.life / p.maxLife; // Normalize alpha
         this.ctx.globalAlpha = alpha;
 
-        this.ctx.save();
-        this.ctx.translate(p.x, p.y);
-
         // 3D Rotation Simulation
-        // Rotate in 2D
-        this.ctx.rotate(p.rotation);
-        // Scale to simulate 3D rotation
         const scaleX = Math.cos(p.angleX);
         const scaleY = Math.cos(p.angleY);
-        this.ctx.scale(scaleX, scaleY);
+        const c = Math.cos(p.rotation);
+        const s = Math.sin(p.rotation);
+        this.ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
 
-        // Draw shard shape instead of circle
         this.ctx.fillStyle = p.color;
-        this.ctx.shadowBlur = 10 * alpha;
-        this.ctx.shadowColor = p.color;
 
         // Glint effect if facing camera
         if (Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9) {
             this.ctx.fillStyle = '#fff';
-            this.ctx.shadowBlur = 20 * alpha;
         }
 
         if ((p.type === 'debris' || p.type === 'shard' || p.type === 'chunk') && p.polyPoints) {
             this.ctx.beginPath();
-            const s = p.size * alpha; // Scale size, not points directly to keep shape relative
-            // Actually points were calculated with initial size.
-            // But we want to shrink them over time.
             const shrink = alpha;
 
-            // Note: polyPoints are relative to (0,0)
             if (p.polyPoints.length > 0) {
                 this.ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
                 for(let i=1; i<p.polyPoints.length; i++) {
@@ -947,7 +975,6 @@ export class Renderer {
             }
             this.ctx.closePath();
 
-            // Add a stroke to make it look like a rock/crystal chunk
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             this.ctx.lineWidth = p.type === 'chunk' ? 2 : 1;
             this.ctx.stroke();
@@ -955,19 +982,16 @@ export class Renderer {
 
         } else {
             this.ctx.beginPath();
-            const s = p.size * alpha; // Scale down with life
-            // Make it a diamond/shard shape
-            this.ctx.moveTo(0, -s);
-            this.ctx.lineTo(s * 0.6, 0);
-            this.ctx.lineTo(0, s);
-            this.ctx.lineTo(-s * 0.6, 0);
+            const sz = p.size * alpha;
+            this.ctx.moveTo(0, -sz);
+            this.ctx.lineTo(sz * 0.6, 0);
+            this.ctx.lineTo(0, sz);
+            this.ctx.lineTo(-sz * 0.6, 0);
             this.ctx.closePath();
             this.ctx.fill();
         }
 
-        this.ctx.restore();
-
-        this.ctx.shadowBlur = 0;
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.globalAlpha = 1.0;
     }
 
@@ -981,12 +1005,9 @@ export class Renderer {
     }
 
     drawSoulParticle(sp) {
-        this.ctx.save();
-        this.ctx.translate(sp.x, sp.y);
+        this.ctx.setTransform(1, 0, 0, 1, sp.x, sp.y);
 
         this.ctx.fillStyle = sp.color;
-        this.ctx.shadowBlur = 15;
-        this.ctx.shadowColor = sp.color;
 
         // Glowing Orb
         this.ctx.beginPath();
@@ -999,12 +1020,11 @@ export class Renderer {
         this.ctx.arc(0, 0, sp.size * 0.4, 0, Math.PI * 2);
         this.ctx.fill();
 
-        this.ctx.restore();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     drawFloatingText(ft) {
-        this.ctx.save();
-        this.ctx.translate(ft.x, ft.y);
+        this.ctx.setTransform(1, 0, 0, 1, ft.x, ft.y);
         this.ctx.scale(ft.scale, ft.scale);
 
         // Outline
@@ -1023,10 +1043,11 @@ export class Renderer {
         this.ctx.fillStyle = ft.color;
         this.ctx.fillText(ft.text, 0, 0);
 
-        this.ctx.restore();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.globalAlpha = 1.0;
     }
 
-    drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high) {
+    drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now()) {
         // JUICE: Apply stress shake to position
         const shakeX = c.shakeX || 0;
         const shakeY = c.shakeY || 0;
@@ -1055,7 +1076,7 @@ export class Renderer {
 
         // JUICE: Critical Danger Glow
         if (c.isCritical && !colorOverride) {
-            const pulse = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+            const pulse = Math.sin(timestamp / 100) * 0.5 + 0.5;
             this.ctx.shadowBlur = 20 + (pulse * 30);
             this.ctx.shadowColor = 'red';
             // Tint fill slightly red
@@ -1300,13 +1321,16 @@ export class Renderer {
 
     drawScanlines(intensity) {
         if (!this.ctx) return;
-        this.ctx.save();
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFillStyle = this.ctx.fillStyle;
         this.ctx.globalCompositeOperation = 'source-over';
         this.ctx.globalAlpha = intensity * 0.3;
         this.ctx.fillStyle = this.scanlinePattern;
         this.ctx.fillRect(0, 0, this.width, this.height);
-        this.ctx.globalAlpha = 1.0;
-        this.ctx.restore();
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.fillStyle = prevFillStyle;
     }
 
     drawGlitch(intensity) {

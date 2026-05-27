@@ -75,12 +75,12 @@ export class Game {
         this.particlePool = new ParticlePool(
             () => new Particle(0, 0, '#fff'),
             (obj, ...args) => obj.reset(...args),
-            100
+            400
         );
         this.trailPool = new ParticlePool(
             () => new TrailParticle(0, 0, '#fff'),
             (obj, ...args) => obj.reset(...args),
-            100
+            300
         );
 
         // Initialize WASM asynchronously
@@ -99,6 +99,7 @@ export class Game {
         this._boundCreateCrystalChunk = this.createCrystalChunk.bind(this);
         this._boundCreateImpactDust = this.createImpactDust.bind(this);
         this._boundUpdateUI = this.updateUI.bind(this);
+        this._boundOnSporeScore = this._onSporeScore.bind(this);
 
         this.bindEvents();
         this.resize();
@@ -242,18 +243,25 @@ export class Game {
     }
 
     createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         const qualityScale = this.getQualityScale();
         const scaledCount = Math.max(1, Math.floor(count * qualityScale));
         const speed = type === 'spark' && count < 5 ? 2.0 : 8.0; // Slower for dust
+        const maxParticles = profile.maxParticles;
         for(let i=0; i<scaledCount; i++) {
-            // Use WASM for juicy explosion pattern
+            if (this.state.particles.length >= maxParticles) break;
+            // Inline JS math to avoid WASM wrapper overhead
             let vx, vy;
             if (angle !== null) {
-                vx = wasmManager.getDirectionalVx(i, scaledCount, speed, angle, spread);
-                vy = wasmManager.getDirectionalVy(i, scaledCount, speed, angle, spread);
+                const fraction = i / scaledCount;
+                const offset = (fraction - 0.5) * spread;
+                const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
+                vx = Math.cos(finalAngle) * speed;
+                vy = Math.sin(finalAngle) * speed;
             } else {
-                vx = wasmManager.getShatterVx(i, scaledCount, speed);
-                vy = wasmManager.getShatterVy(i, scaledCount, speed);
+                const a = (i / scaledCount) * Math.PI * 2;
+                vx = Math.cos(a) * speed;
+                vy = Math.sin(a) * speed;
             }
 
             this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, type));
@@ -262,13 +270,18 @@ export class Game {
 
     createDebris(x, y, color, count = 4, angle = null, spread = 1.0) {
         const scaledCount = Math.max(1, Math.floor(count * this.getQualityScale()));
+        const maxParticles = this.renderer.getQualityProfile(this.state.renderQuality).maxParticles;
         for(let i=0; i<scaledCount; i++) {
+             if (this.state.particles.length >= maxParticles) break;
              let vx, vy;
              const speed = Math.random() * 5 + 3;
 
              if (angle !== null) {
-                 vx = wasmManager.getDirectionalVx(i, scaledCount, speed, angle, spread);
-                 vy = wasmManager.getDirectionalVy(i, scaledCount, speed, angle, spread);
+                 const fraction = i / scaledCount;
+                 const offset = (fraction - 0.5) * spread;
+                 const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
+                 vx = Math.cos(finalAngle) * speed;
+                 vy = Math.sin(finalAngle) * speed;
              } else {
                  // Debris flies out randomly if no angle
                  const rndAngle = Math.random() * Math.PI * 2;
@@ -325,26 +338,10 @@ export class Game {
             this.state.shakeOffset.x = dx;
             this.state.shakeOffset.y = dy;
             this.state.shakeOffset.angle = angle;
-
-            // Apply to background only if transform changed
-            if (this.background && this.background.image) {
-                const newTransform = `translate(${dx}px, ${dy}px) rotate(${angle}rad) scale(1.02)`;
-                if (this._lastBgTransform !== newTransform) {
-                    this.background.image.style.transform = newTransform;
-                    this._lastBgTransform = newTransform;
-                }
-            }
         } else {
             this.state.shakeOffset.x = 0;
             this.state.shakeOffset.y = 0;
             this.state.shakeOffset.angle = 0;
-            if (this.background && this.background.image) {
-                const newTransform = 'translate(0, 0) rotate(0) scale(1)';
-                if (this._lastBgTransform !== newTransform) {
-                    this.background.image.style.transform = newTransform;
-                    this._lastBgTransform = newTransform;
-                }
-            }
         }
     }
 
@@ -505,6 +502,7 @@ export class Game {
             return;
         }
 
+        let uiNeedsUpdate = false;
         // Update Spores
         for (let i = this.state.spores.length - 1; i >= 0; i--) {
             let s = this.state.spores[i];
@@ -514,81 +512,20 @@ export class Game {
                 laneCrystals ? laneCrystals.bottom : null,
                 this.renderer.height,
                 this._boundCreateParticles,
-                (points, isMatch, x, y, color) => {
-
-                if (isMatch) {
-                    // Spawn Soul Particles for Collection Juice
-                    const soulCount = 3 + Math.floor(Math.random() * 2);
-                    // Target top-left score area
-                    const tx = 60;
-                    const ty = 60;
-
-                    // JUICE: Sympathetic Resonance
-                    this.triggerResonance(color);
-
-                    for(let k=0; k<soulCount; k++) {
-                        let val = Math.floor(points / soulCount);
-                        if (k === 0) val += points % soulCount;
-                        this.state.soulParticles.push(new SoulParticle(x, y, color, tx, ty, val));
-                    }
-
-                    // JUICE: Combo Logic
-                    this.state.combo++;
-                    this.state.comboTimer = 2000; // 2 seconds to keep combo
-
-                    // Time Dilation on High Combo
-                    if (this.state.combo > 2) {
-                        this.state.targetTimeScale = 0.3;
-                        this.state.slowMoTimer = 400; // Short burst of slow-mo
-                    }
-
-                    // Pitch Shift
-                    const pitch = 1.0 + (Math.min(this.state.combo, 10) * 0.1);
-                    SoundManager.match(pitch);
-
-                    // Screen Shake
-                    this.state.shake = 15 + (this.state.combo * 2);
-
-                    // Impact Zoom
-                    this.state.zoom = 1.02 + (Math.min(this.state.combo, 10) * 0.01);
-                    this.state.zoomFocus = { x: x || this.renderer.width/2, y: y || this.renderer.height/2 };
-
-                    this.state.impactFlash = 0.6; // stronger flash
-                    this.state.impactFlashColor = color || '#fff'; // Use match color
-                    this.state.sleepTimer = 50; // 50ms Hit Stop
-
-                    if (x !== undefined && y !== undefined) {
-                        this.createFloatingText(x, y, `+${points}`, '#fff');
-
-                        // JUICE: Combo Text
-                        if (this.state.combo > 1) {
-                            const comboColors = ['#fff', '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
-                            const colIdx = Math.min(this.state.combo - 1, comboColors.length - 1);
-                            const scale = 1.5 + (this.state.combo * 0.2);
-                            this.createFloatingText(x, y - 30, `COMBO x${this.state.combo}!`, comboColors[colIdx], scale);
-                        }
-                    }
-                } else if (points === 0) {
-                    // Mismatch - Break Combo
-                    this.state.combo = 0;
-                    this.state.comboTimer = 0;
-                    SoundManager.mismatch();
-
-                    this.state.shake = 25;
-                    this.state.impactFlash = 0.3; // Small flash on error
-                    this.state.impactFlashColor = '#f00'; // Red flash on miss
-                    this.state.sleepTimer = 30; // Small hit stop for errors too
-                    if (x !== undefined && y !== undefined) {
-                        this.createFloatingText(x, y, "MISS", '#f00');
-                    }
-                }
-            }, this._boundCreateShockwave, this._boundCreateTrailParticle, this._boundCreateDebris, this._boundCreateCrystalChunk, timeScale);
+                this._boundOnSporeScore,
+                this._boundCreateShockwave,
+                this._boundCreateTrailParticle,
+                this._boundCreateDebris,
+                this._boundCreateCrystalChunk,
+                timeScale
+            );
             if (!s.active) {
                 this.state.spores[i] = this.state.spores[this.state.spores.length - 1];
                 this.state.spores.pop();
-                this._boundUpdateUI();
+                uiNeedsUpdate = true;
             }
         }
+        if (uiNeedsUpdate) this._boundUpdateUI();
 
         // Pass trail callback for juice
         this.launcher.update(this._boundCreateTrailParticle, timeScale);
@@ -678,7 +615,7 @@ export class Game {
 
         // Update Atmospheric Dust
         this.state.dustParticles.forEach(p => {
-            p.update(this.renderer.width, this.renderer.height, this.state.shockwaves, timeScale);
+            p.update(this.renderer.width, this.renderer.height, timeScale);
         });
 
         // Score lerp and UI update
@@ -707,6 +644,75 @@ export class Game {
         const nextCol = COLORS[this.state.nextSporeColorIdx];
         this.ui.preview.style.backgroundColor = nextCol.hex;
         this.ui.preview.style.boxShadow = `0 0 20px ${nextCol.hex}`;
+    }
+
+    _onSporeScore(points, isMatch, x, y, color) {
+        if (isMatch) {
+            // Spawn Soul Particles for Collection Juice
+            const soulCount = 3 + Math.floor(Math.random() * 2);
+            // Target top-left score area
+            const tx = 60;
+            const ty = 60;
+
+            // JUICE: Sympathetic Resonance
+            this.triggerResonance(color);
+
+            for(let k=0; k<soulCount; k++) {
+                let val = Math.floor(points / soulCount);
+                if (k === 0) val += points % soulCount;
+                this.state.soulParticles.push(new SoulParticle(x, y, color, tx, ty, val));
+            }
+
+            // JUICE: Combo Logic
+            this.state.combo++;
+            this.state.comboTimer = 2000; // 2 seconds to keep combo
+
+            // Time Dilation on High Combo
+            if (this.state.combo > 2) {
+                this.state.targetTimeScale = 0.3;
+                this.state.slowMoTimer = 400; // Short burst of slow-mo
+            }
+
+            // Pitch Shift
+            const pitch = 1.0 + (Math.min(this.state.combo, 10) * 0.1);
+            SoundManager.match(pitch);
+
+            // Screen Shake
+            this.state.shake = 15 + (this.state.combo * 2);
+
+            // Impact Zoom
+            this.state.zoom = 1.02 + (Math.min(this.state.combo, 10) * 0.01);
+            this.state.zoomFocus = { x: x || this.renderer.width/2, y: y || this.renderer.height/2 };
+
+            this.state.impactFlash = 0.6; // stronger flash
+            this.state.impactFlashColor = color || '#fff'; // Use match color
+            this.state.sleepTimer = 50; // 50ms Hit Stop
+
+            if (x !== undefined && y !== undefined) {
+                this.createFloatingText(x, y, `+${points}`, '#fff');
+
+                // JUICE: Combo Text
+                if (this.state.combo > 1) {
+                    const comboColors = ['#fff', '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
+                    const colIdx = Math.min(this.state.combo - 1, comboColors.length - 1);
+                    const scale = 1.5 + (this.state.combo * 0.2);
+                    this.createFloatingText(x, y - 30, `COMBO x${this.state.combo}!`, comboColors[colIdx], scale);
+                }
+            }
+        } else if (points === 0) {
+            // Mismatch - Break Combo
+            this.state.combo = 0;
+            this.state.comboTimer = 0;
+            SoundManager.mismatch();
+
+            this.state.shake = 25;
+            this.state.impactFlash = 0.3; // Small flash on error
+            this.state.impactFlashColor = '#f00'; // Red flash on miss
+            this.state.sleepTimer = 30; // Small hit stop for errors too
+            if (x !== undefined && y !== undefined) {
+                this.createFloatingText(x, y, "MISS", '#f00');
+            }
+        }
     }
 
     getQualityScale() {
@@ -784,7 +790,7 @@ export class Game {
             this.state.sleepTimer -= dt;
             // Still draw (frozen frame), maybe with continued shake
             this.calculateShake();
-            this.renderer.draw(this.state, this.launcher);
+            this.renderer.draw(this.state, this.launcher, timestamp);
             requestAnimationFrame(this._boundLoop);
             return;
         }
@@ -796,7 +802,7 @@ export class Game {
             this.updateVisuals(dt);
         }
         this.calculateShake();
-        this.renderer.draw(this.state, this.launcher);
+        this.renderer.draw(this.state, this.launcher, timestamp);
 
         requestAnimationFrame(this._boundLoop);
     }

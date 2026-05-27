@@ -101,7 +101,7 @@ export class Spore {
         this.radius = 10;
         this.colorIdx = colorIdx;
         this.active = true;
-        this.spawnTime = Date.now(); // For elastic animation
+        this.spawnTime = performance.now(); // For elastic animation
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
 
         // Pre-generate lightning arcs so draw loop doesn't call Math.random()
@@ -273,7 +273,8 @@ export class Particle {
         }
 
         if (type === 'debris') {
-            this.polyPoints = [];
+            if (!this.polyPoints) this.polyPoints = [];
+            else this.polyPoints.length = 0;
             const numPoints = 3 + Math.floor(Math.random() * 3); // 3 to 5
             for(let i=0; i<numPoints; i++) {
                 const angle = (i / numPoints) * Math.PI * 2;
@@ -284,7 +285,8 @@ export class Particle {
                 });
             }
         } else if (type === 'shard') {
-            this.polyPoints = [];
+            if (!this.polyPoints) this.polyPoints = [];
+            else this.polyPoints.length = 0;
             // Create a jagged shard (elongated triangle)
             // Tip
             this.polyPoints.push({ x: 0, y: -this.size });
@@ -293,7 +295,8 @@ export class Particle {
             // Left base
             this.polyPoints.push({ x: -this.size * 0.3, y: this.size });
         } else if (type === 'chunk') {
-            this.polyPoints = [];
+            if (!this.polyPoints) this.polyPoints = [];
+            else this.polyPoints.length = 0;
             // Random jagged polygon
             const numPoints = 5 + Math.floor(Math.random() * 3);
             for(let i=0; i<numPoints; i++) {
@@ -362,7 +365,7 @@ export class Particle {
                  onBounceCallback(this.x, this.y, this.color);
             }
 
-            this.vy = wasmManager.getBounceVy(this.vy, 0.6);
+            this.vy = -this.vy * 0.6;
 
             // Randomize X slightly on bounce
             this.vx += (Math.random() - 0.5) * 2;
@@ -376,8 +379,9 @@ export class Particle {
         this.angleX += this.velAngleX * timeScale;
         this.angleY += this.velAngleY * timeScale;
 
-        // Decay
-        this.life -= 0.015 * timeScale;
+        // Decay: clamp timeScale so slow-mo doesn't make particles immortal
+        const lifeDecayScale = Math.max(timeScale, 0.25);
+        this.life -= 0.015 * lifeDecayScale;
     }
 }
 
@@ -406,7 +410,8 @@ export class TrailParticle {
     update(timeScale = 1.0) {
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
-        this.life -= 0.05 * timeScale; // Fade fast
+        const lifeDecayScale = Math.max(timeScale, 0.25);
+        this.life -= 0.05 * lifeDecayScale; // Fade fast
         this.size *= (1 - 0.1 * timeScale); // Shrink
     }
 }
@@ -424,19 +429,27 @@ export class ParticlePool {
     acquire(...args) {
         let obj = this.available.pop() || this.createFn();
         this.resetFn(obj, ...args);
+        obj._poolIndex = this.inUse.length;
         this.inUse.push(obj);
         return obj;
     }
     release(obj) {
-        const idx = this.inUse.indexOf(obj);
-        if (idx >= 0) {
-            this.inUse[idx] = this.inUse[this.inUse.length - 1];
-            this.inUse.pop();
+        const idx = obj._poolIndex;
+        if (idx >= 0 && idx < this.inUse.length) {
+            const last = this.inUse.pop();
+            if (last !== obj) {
+                last._poolIndex = idx;
+                this.inUse[idx] = last;
+            }
+            obj._poolIndex = -1;
+            this.available.push(obj);
         }
-        this.available.push(obj);
     }
     releaseAll() {
-        this.available.push(...this.inUse);
+        for (let i = 0; i < this.inUse.length; i++) {
+            this.inUse[i]._poolIndex = -1;
+            this.available.push(this.inUse[i]);
+        }
         this.inUse.length = 0;
     }
 }
@@ -588,10 +601,17 @@ export class SoulParticle {
     }
 
     update(createTrailCallback, timeScale = 1.0) {
-        // Use WASM for homing physics
-        // Apply timeScale to agility
-        this.vx = wasmManager.calculateHomingVx(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility * timeScale);
-        this.vy = wasmManager.calculateHomingVy(this.vx, this.vy, this.x, this.y, this.targetX, this.targetY, this.speed, this.agility * timeScale);
+        // Inline homing physics to avoid WASM bridge overhead
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+            const desiredVx = (dx / dist) * this.speed;
+            const desiredVy = (dy / dist) * this.speed;
+            const agilityScale = Math.max(timeScale, 0.25);
+            this.vx += (desiredVx - this.vx) * this.agility * agilityScale;
+            this.vy += (desiredVy - this.vy) * this.agility * agilityScale;
+        }
 
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
@@ -603,15 +623,14 @@ export class SoulParticle {
         }
 
         // Check arrival
-        const dx = this.targetX - this.x;
-        const dy = this.targetY - this.y;
         const distSq = dx * dx + dy * dy;
 
         if (distSq < 900) { // 30px radius arrival threshold
             return true; // Arrived
         }
 
-        this.life -= 0.005 * timeScale;
+        const lifeDecayScale = Math.max(timeScale, 0.25);
+        this.life -= 0.005 * lifeDecayScale;
         if (this.life <= 0) return true; // Timeout
 
         return false;
