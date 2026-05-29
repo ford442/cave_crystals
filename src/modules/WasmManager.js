@@ -280,6 +280,28 @@ export class WasmManager {
         const desiredVy = (dy / dist) * speed;
         return currVy + (desiredVy - currVy) * agility;
     }
+
+    /**
+     * Calculate X velocity for a spiral burst particle
+     */
+    getSpiralVx(index, total, force, spiralFactor) {
+        if (this.ready && this.exports.getSpiralVx) {
+            return this.exports.getSpiralVx(index, total, force, spiralFactor);
+        }
+        const angle = (index / total) * Math.PI * 2;
+        return Math.cos(angle) * force + Math.sin(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
+    }
+
+    /**
+     * Calculate Y velocity for a spiral burst particle
+     */
+    getSpiralVy(index, total, force, spiralFactor) {
+        if (this.ready && this.exports.getSpiralVy) {
+            return this.exports.getSpiralVy(index, total, force, spiralFactor);
+        }
+        const angle = (index / total) * Math.PI * 2;
+        return Math.sin(angle) * force - Math.cos(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
+    }
 }
 
 // Create and export a singleton instance

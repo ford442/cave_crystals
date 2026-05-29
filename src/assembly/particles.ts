@@ -124,6 +124,25 @@ export function getSmokeVy(random: f64): f64 {
 }
 
 /**
+ * Calculate X velocity for a spiral burst particle
+ * Combines radial outward force with tangential spin to create a spiral path
+ */
+export function getSpiralVx(index: i32, total: i32, force: f64, spiralFactor: f64): f64 {
+    const angle: f64 = (f64(index) / f64(total)) * 6.28318530718;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.3;
+    return Math.cos(angle) * force + Math.sin(angle) * spiralFactor + randomVariation;
+}
+
+/**
+ * Calculate Y velocity for a spiral burst particle
+ */
+export function getSpiralVy(index: i32, total: i32, force: f64, spiralFactor: f64): f64 {
+    const angle: f64 = (f64(index) / f64(total)) * 6.28318530718;
+    const randomVariation: f64 = (fastRandom() - 0.5) * 0.3;
+    return Math.sin(angle) * force - Math.cos(angle) * spiralFactor + randomVariation;
+}
+
+/**
  * Calculate X velocity for homing particle (steering towards target)
  * Uses steering behavior: Steering = Desired - Velocity
  */
