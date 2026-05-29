@@ -225,6 +225,16 @@ export class Particle {
         if (vx !== null && vy !== null) {
             this.vx = vx;
             this.vy = vy;
+        } else if (type === 'aura') {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 0.6 + 0.2;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed - 0.4; // bias upward
+        } else if (type === 'ember') {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 3 + 1.5;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
         } else {
             const angle = Math.random() * Math.PI * 2;
             const speed = type === 'debris' ? Math.random() * 8 + 4 : Math.random() * 5 + 2;
@@ -233,12 +243,24 @@ export class Particle {
         }
 
         this.life = 1.0;
-        this.maxLife = (type === 'debris' || type === 'shard') ? 2.0 : 1.0;
+        if (type === 'debris' || type === 'shard') {
+            this.maxLife = 2.0;
+        } else if (type === 'aura') {
+            this.maxLife = 1.5 + Math.random() * 0.8;
+        } else if (type === 'ember') {
+            this.maxLife = 0.8;
+        } else {
+            this.maxLife = 1.0;
+        }
         this.color = color;
         if (type === 'debris') {
             this.size = Math.random() * 8 + 12;
         } else if (type === 'shard') {
             this.size = Math.random() * 10 + 8; // Longer shards
+        } else if (type === 'aura') {
+            this.size = Math.random() * 2.5 + 0.8;
+        } else if (type === 'ember') {
+            this.size = Math.random() * 2 + 0.8;
         } else {
             this.size = Math.random() * 6 + 2;
         }
@@ -266,6 +288,14 @@ export class Particle {
             this.floorBounce = false; // No bounce, shatter
             this.maxLife = 2.0;
             this.size = Math.random() * 10 + 20; // Large
+        } else if (type === 'aura') {
+            this.gravity = -0.03; // Float upward
+            this.friction = 0.99;
+            this.floorBounce = false;
+        } else if (type === 'ember') {
+            this.gravity = 0.12;
+            this.friction = 0.97;
+            this.floorBounce = false;
         } else {
             this.gravity = type === 'debris' ? 0.6 : 0.4;
             this.friction = type === 'debris' ? 0.95 : 0.98;
@@ -469,6 +499,25 @@ export class Shockwave {
         this.radius += 10 * timeScale; // Expand fast
         this.life -= 0.05 * timeScale; // Fade out
         this.width = Math.max(0, this.width - 0.5 * timeScale);
+    }
+}
+
+export class EnergyRing {
+    constructor(x, y, color, comboLevel = 1) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.comboLevel = Math.min(comboLevel, 8);
+        this.radius = 5;
+        this.life = 1.0;
+        this.width = 5 + this.comboLevel * 0.8;
+    }
+
+    update(timeScale = 1.0) {
+        const speed = 5 + this.comboLevel * 0.5;
+        this.radius += speed * timeScale;
+        this.life -= 0.05 * Math.max(timeScale, 0.25);
+        this.width = Math.max(0, this.width - 0.25 * timeScale);
     }
 }
 

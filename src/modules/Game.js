@@ -1,6 +1,7 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave, FloatingText, Launcher, SoulParticle, DustParticle, ParticlePool } from './Entities.js';
+import { Crystal, Spore, Particle, TrailParticle, Shockwave, EnergyRing,
+         FloatingText, Launcher, SoulParticle, DustParticle, ParticlePool } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
@@ -68,7 +69,8 @@ export class Game {
             slowMoTimer: 0,
             qualityMode: 'auto',
             renderQuality: 'high',
-            laneMap: new Map() // key: lane, value: { top: crystal, bottom: crystal }
+            laneMap: new Map(), // key: lane, value: { top: crystal, bottom: crystal }
+            energyRings: []
         };
 
         // Object pools for high-frequency particles (reduces GC pressure)
@@ -148,6 +150,7 @@ export class Game {
         this.state.floatingTexts = [];
         this.state.soulParticles = [];
         this.state.dustParticles = [];
+        this.state.energyRings = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
@@ -242,6 +245,61 @@ export class Game {
         this.createParticles(x, y, color, 3, -Math.PI/2, 2.0, 'spark');
     }
 
+    createCrystalAura(crystal) {
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+        if (this.state.particles.length >= profile.maxParticles) return;
+
+        const x = (crystal.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + (crystal.shakeX || 0);
+        const tipY = crystal.type === 'top' ? crystal.height : this.renderer.height - crystal.height;
+        const spread = crystal.isCritical ? 28 : 14;
+        const px = x + (Math.random() - 0.5) * spread;
+        const py = tipY + (Math.random() - 0.5) * spread;
+
+        const color = COLORS[crystal.colorIdx].hex;
+        this.state.particles.push(this.particlePool.acquire(px, py, color, null, null, 'aura'));
+
+        if (crystal.isCritical && Math.random() < 0.4 && this.state.particles.length < profile.maxParticles) {
+            const px2 = x + (Math.random() - 0.5) * spread * 1.5;
+            const py2 = tipY + (Math.random() - 0.5) * spread * 1.5;
+            this.state.particles.push(this.particlePool.acquire(px2, py2, color, null, null, 'aura'));
+        }
+    }
+
+    createMatchBurst(x, y, color, combo) {
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+        const qualityScale = this.getQualityScale();
+        const maxParticles = profile.maxParticles;
+
+        // Energy ring (always) - scales with combo
+        this.state.energyRings.push(new EnergyRing(x, y, color, combo));
+
+        // Second white ring on high combo
+        if (combo > 3) {
+            this.state.energyRings.push(new EnergyRing(x, y, '#ffffff', 1));
+        }
+
+        // Dissolving sparkle particles in a spiral pattern
+        const dissolveCount = Math.floor((8 + combo * 2) * qualityScale);
+        for (let i = 0; i < dissolveCount; i++) {
+            if (this.state.particles.length >= maxParticles) break;
+            const vx = wasmManager.getSpiralVx(i, dissolveCount, 3.5, 1.5);
+            const vy = wasmManager.getSpiralVy(i, dissolveCount, 3.5, 1.5);
+            this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, 'aura'));
+        }
+
+        // Rainbow starburst on high combo (>= 5), high-quality only
+        if (combo >= 5 && profile.crystalDetail === 'high') {
+            for (let i = 0; i < COLORS.length; i++) {
+                if (this.state.particles.length >= maxParticles) break;
+                const angle = (i / COLORS.length) * Math.PI * 2;
+                const speed = 6 + Math.random() * 3;
+                const vx = Math.cos(angle) * speed;
+                const vy = Math.sin(angle) * speed;
+                this.state.particles.push(this.particlePool.acquire(x, y, COLORS[i].hex, vx, vy, 'aura'));
+            }
+        }
+    }
+
     createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
         const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         const qualityScale = this.getQualityScale();
@@ -315,6 +373,7 @@ export class Game {
     }
 
     triggerResonance(hexColor) {
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         this.state.crystals.forEach(c => {
              const cHex = COLORS[c.colorIdx].hex;
              if (cHex === hexColor) {
@@ -322,6 +381,20 @@ export class Game {
                  c.velScaleY += 0.5; // Jump up
                  c.velScaleX -= 0.1; // Squash in slightly
                  c.flash = 0.8;
+
+                 // Resonance echo aura particles
+                 if (profile.crystalDetail !== 'low') {
+                     const cx = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
+                     const tipY = c.type === 'top' ? c.height : this.renderer.height - c.height;
+                     for (let i = 0; i < 3; i++) {
+                         if (this.state.particles.length >= profile.maxParticles) break;
+                         this.state.particles.push(this.particlePool.acquire(
+                             cx + (Math.random() - 0.5) * 24,
+                             tipY + (Math.random() - 0.5) * 24,
+                             hexColor, null, null, 'aura'
+                         ));
+                     }
+                 }
              }
         });
     }
@@ -475,6 +548,14 @@ export class Game {
                     gameOver = true;
                 }
             }
+
+            // Ambient crystal aura emission (gated by quality and spawn state)
+            if (c.hasSpawned && this.renderer.getQualityProfile(this.state.renderQuality).crystalDetail !== 'low') {
+                const emitProb = c.isCritical ? 0.25 : 0.06;
+                if (Math.random() < emitProb * timeScale) {
+                    this.createCrystalAura(c);
+                }
+            }
         });
 
         // JUICE: Update Critical Intensity & Heartbeat
@@ -579,6 +660,15 @@ export class Game {
             if (sw.life <= 0) {
                 this.state.shockwaves[i] = this.state.shockwaves[this.state.shockwaves.length - 1];
                 this.state.shockwaves.pop();
+            }
+        }
+
+        // Update Energy Rings
+        for (let i = this.state.energyRings.length - 1; i >= 0; i--) {
+            this.state.energyRings[i].update(timeScale);
+            if (this.state.energyRings[i].life <= 0) {
+                this.state.energyRings[i] = this.state.energyRings[this.state.energyRings.length - 1];
+                this.state.energyRings.pop();
             }
         }
 
@@ -690,6 +780,9 @@ export class Game {
 
             if (x !== undefined && y !== undefined) {
                 this.createFloatingText(x, y, `+${points}`, '#fff');
+
+                // Multi-phase match burst VFX
+                this.createMatchBurst(x, y, color, this.state.combo);
 
                 // JUICE: Combo Text
                 if (this.state.combo > 1) {
@@ -828,11 +921,31 @@ export class Game {
                 y = this.renderer.height - (h / 2);
             }
 
-            // Spawn many particles
-            // Use crystal color
             const color = COLORS[c.colorIdx].hex;
-            this.createParticles(x, y, color, 30, null, 1.5, 'shard'); // 30 shards per crystal
+            const crystalName = COLORS[c.colorIdx].name;
+
+            // Layer 1: Main shard burst
+            this.createParticles(x, y, color, 30, null, 1.5, 'shard');
+            // Layer 2: Heavy debris tumbling outward
+            this.createDebris(x, y, color, 5, null, 1.0);
+            // Layer 3: Shockwave ring
             this.createShockwave(x, y, color);
+            // Layer 4: Energy ring for extra pop
+            this.state.energyRings.push(new EnergyRing(x, y, color, 4));
+            // Layer 5: Amber-specific ember trails
+            if (crystalName === 'Amber') {
+                const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+                const emberCount = profile.crystalDetail === 'high' ? 8 : 4;
+                for (let j = 0; j < emberCount; j++) {
+                    if (this.state.particles.length < profile.maxParticles) {
+                        this.state.particles.push(this.particlePool.acquire(
+                            x + (Math.random() - 0.5) * 20,
+                            y + (Math.random() - 0.5) * 20,
+                            '#FF6600', null, null, 'ember'
+                        ));
+                    }
+                }
+            }
         });
 
         // Remove all crystals to simulate total destruction

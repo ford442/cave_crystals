@@ -204,6 +204,14 @@ export class Renderer {
             }
         }
 
+        if (gameState.energyRings) {
+            for (let i = 0; i < gameState.energyRings.length; i++) {
+               const ring = gameState.energyRings[i];
+               if (ring.x + ring.radius < 0 || ring.x - ring.radius > this.width || ring.y + ring.radius < 0 || ring.y - ring.radius > this.height) continue;
+               this.drawEnergyRing(ring);
+            }
+        }
+
         if (gameState.floatingTexts) {
             for (let i = 0; i < gameState.floatingTexts.length; i++) {
                const ft = gameState.floatingTexts[i];
@@ -945,7 +953,83 @@ export class Renderer {
         this.ctx.strokeStyle = prevStrokeStyle;
     }
 
+    drawEnergyRing(ring) {
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevComposite = this.ctx.globalCompositeOperation;
+        const prevLineWidth = this.ctx.lineWidth;
+        const prevStrokeStyle = this.ctx.strokeStyle;
+        const prevShadowBlur = this.ctx.shadowBlur;
+        const prevShadowColor = this.ctx.shadowColor;
+
+        const alpha = Math.max(0, ring.life);
+        this.ctx.globalCompositeOperation = 'lighter';
+        this.ctx.shadowColor = ring.color;
+        this.ctx.shadowBlur = 12;
+
+        // Outer ring
+        this.ctx.globalAlpha = alpha * 0.85;
+        this.ctx.lineWidth = ring.width;
+        this.ctx.strokeStyle = ring.color;
+        this.ctx.beginPath();
+        this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        // Inner echo for combos > 1
+        if (ring.comboLevel > 1 && ring.life > 0.25) {
+            this.ctx.globalAlpha = alpha * 0.35;
+            this.ctx.lineWidth = ring.width * 0.5;
+            this.ctx.beginPath();
+            this.ctx.arc(ring.x, ring.y, ring.radius * 0.55, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.globalCompositeOperation = prevComposite;
+        this.ctx.lineWidth = prevLineWidth;
+        this.ctx.strokeStyle = prevStrokeStyle;
+        this.ctx.shadowBlur = prevShadowBlur;
+        this.ctx.shadowColor = prevShadowColor;
+    }
+
     drawParticle(p) {
+        // Fast path for aura particles: soft additive glow circles
+        if (p.type === 'aura') {
+            const alpha = (p.life / p.maxLife) * 0.55;
+            this.ctx.globalCompositeOperation = 'lighter';
+            // Outer soft glow
+            this.ctx.globalAlpha = alpha * 0.3;
+            this.ctx.fillStyle = p.color;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size * 3.5, 0, Math.PI * 2);
+            this.ctx.fill();
+            // Bright core
+            this.ctx.globalAlpha = alpha;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.globalCompositeOperation = 'source-over';
+            this.ctx.globalAlpha = 1.0;
+            return;
+        }
+
+        // Fast path for ember particles: bright tiny spark with white core
+        if (p.type === 'ember') {
+            const alpha = p.life / p.maxLife;
+            this.ctx.globalAlpha = alpha;
+            this.ctx.globalCompositeOperation = 'lighter';
+            this.ctx.fillStyle = p.color;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.fillStyle = '#ffff88';
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.globalCompositeOperation = 'source-over';
+            this.ctx.globalAlpha = 1.0;
+            return;
+        }
+
         const alpha = p.life / p.maxLife; // Normalize alpha
         this.ctx.globalAlpha = alpha;
 
@@ -1005,9 +1089,19 @@ export class Renderer {
     }
 
     drawSoulParticle(sp) {
+        // Outer glow halo using additive blending
+        this.ctx.globalCompositeOperation = 'lighter';
+        this.ctx.globalAlpha = (sp.life || 1.0) * 0.25;
+        this.ctx.fillStyle = sp.color;
+        this.ctx.beginPath();
+        this.ctx.arc(sp.x, sp.y, sp.size * 3, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.globalCompositeOperation = 'source-over';
+
         this.ctx.setTransform(1, 0, 0, 1, sp.x, sp.y);
 
         this.ctx.fillStyle = sp.color;
+        this.ctx.globalAlpha = sp.life || 1.0;
 
         // Glowing Orb
         this.ctx.beginPath();
@@ -1021,6 +1115,7 @@ export class Renderer {
         this.ctx.fill();
 
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.globalAlpha = 1.0;
     }
 
     drawFloatingText(ft) {
