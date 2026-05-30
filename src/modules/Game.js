@@ -70,7 +70,8 @@ export class Game {
             qualityMode: 'auto',
             renderQuality: 'high',
             laneMap: new Map(), // key: lane, value: { top: crystal, bottom: crystal }
-            energyRings: []
+            energyRings: [],
+            envParticles: []
         };
 
         // Object pools for high-frequency particles (reduces GC pressure)
@@ -151,6 +152,7 @@ export class Game {
         this.state.soulParticles = [];
         this.state.dustParticles = [];
         this.state.energyRings = [];
+        this.state.envParticles = [];
         this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
@@ -707,6 +709,112 @@ export class Game {
         this.state.dustParticles.forEach(p => {
             p.update(this.renderer.width, this.renderer.height, timeScale);
         });
+
+        // Update Environmental Particles (cave drips, motes, rock dust)
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+        const maxEnv = profile.maxEnvParticles || 0;
+        if (maxEnv > 0) {
+            const rw = this.renderer.width;
+            const rh = this.renderer.height;
+            const criticalIntensity = this.state.criticalIntensity || 0;
+
+            // Move and decay existing env particles
+            for (let i = this.state.envParticles.length - 1; i >= 0; i--) {
+                const ep = this.state.envParticles[i];
+
+                // Apply shockwave radial push
+                for (const sw of this.state.shockwaves) {
+                    if (sw.life <= 0) continue;
+                    const dx = ep.x - sw.x;
+                    const dy = ep.y - sw.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const influence = sw.radius * 1.5;
+                    if (dist < influence && dist > 0) {
+                        const push = (1 - dist / influence) * sw.life * 2.5;
+                        ep.vx += (dx / dist) * push;
+                        ep.vy += (dy / dist) * push;
+                    }
+                }
+
+                ep.x += ep.vx * timeScale;
+                ep.y += ep.vy * timeScale;
+                ep.life -= (ep.decayRate || 0.0005) * dt * timeScale;
+
+                // Gentle gravity for drips
+                if (ep.type === 'drip') ep.vy = Math.min(ep.vy + 0.04 * timeScale, 4);
+                // Slight drift for motes
+                if (ep.type === 'mote') ep.vx += (Math.random() - 0.5) * 0.04 * timeScale;
+                // Clamp mote velocity
+                if (ep.type === 'mote') {
+                    ep.vx = Math.max(-0.6, Math.min(0.6, ep.vx));
+                    ep.vy = Math.max(-1.2, Math.min(0.2, ep.vy));
+                }
+
+                if (ep.life <= 0 || ep.y > rh + 10 || ep.y < -10) {
+                    this.state.envParticles[i] = this.state.envParticles[this.state.envParticles.length - 1];
+                    this.state.envParticles.pop();
+                }
+            }
+
+            // Spawn new drips from stalactite tips
+            const dripRate = 0.008 + criticalIntensity * 0.018;
+            if (Math.random() < dripRate && this.state.envParticles.length < maxEnv) {
+                const geo = this.renderer._caveGeometry;
+                if (geo && geo.dripSpawnPositions && geo.dripSpawnPositions.length > 0) {
+                    const sp = geo.dripSpawnPositions[Math.floor(Math.random() * geo.dripSpawnPositions.length)];
+                    const isGlowing = Math.random() < 0.15;
+                    const colorIdx = Math.floor(Math.random() * COLORS.length);
+                    this.state.envParticles.push({
+                        type: 'drip',
+                        x: sp.x + (Math.random() - 0.5) * 6,
+                        y: sp.y,
+                        vx: (Math.random() - 0.5) * 0.3,
+                        vy: 0.5 + Math.random() * 1.5,
+                        size: 1 + Math.random() * 1.5,
+                        life: 1.0,
+                        decayRate: 0.0004 + Math.random() * 0.0003,
+                        glowing: isGlowing,
+                        color: isGlowing ? COLORS[colorIdx].hex : null,
+                    });
+                }
+            }
+
+            // Spawn ambient motes
+            if (Math.random() < 0.004 && this.state.envParticles.length < maxEnv) {
+                const colorIdx = Math.floor(Math.random() * COLORS.length);
+                this.state.envParticles.push({
+                    type: 'mote',
+                    x: Math.random() * rw * 0.25 + (Math.random() < 0.5 ? 0 : rw * 0.75),
+                    y: rh * 0.2 + Math.random() * rh * 0.7,
+                    vx: (Math.random() - 0.5) * 0.4,
+                    vy: -(0.2 + Math.random() * 0.5),
+                    size: 0.8 + Math.random() * 1.4,
+                    life: 1.0,
+                    decayRate: 0.0003 + Math.random() * 0.0002,
+                    color: COLORS[colorIdx].hex,
+                });
+            }
+
+            // Rock dust cascade after fresh shockwaves
+            for (const sw of this.state.shockwaves) {
+                if (sw.life > 0.88 && this.state.envParticles.length < maxEnv) {
+                    const count = 2 + Math.floor(Math.random() * 3);
+                    for (let k = 0; k < count; k++) {
+                        if (this.state.envParticles.length >= maxEnv) break;
+                        this.state.envParticles.push({
+                            type: 'rockdust',
+                            x: sw.x + (Math.random() - 0.5) * sw.radius,
+                            y: (Math.random() < 0.6 ? 0 : rh) + (Math.random() - 0.5) * 20,
+                            vx: (Math.random() - 0.5) * 2.5,
+                            vy: 0.8 + Math.random() * 2.5,
+                            size: 1 + Math.random() * 2,
+                            life: 1.0,
+                            decayRate: 0.0015 + Math.random() * 0.001,
+                        });
+                    }
+                }
+            }
+        }
 
         // Score lerp and UI update
         const oldDisplay = this.state.displayScore;
