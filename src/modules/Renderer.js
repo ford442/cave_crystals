@@ -145,7 +145,7 @@ export class Renderer {
              }
 
              // Only apply chromatic aberration to launcher, not crystals
-             this.drawComplexCrystal(c, null, particleCount, profile, timestamp);
+             this.drawComplexCrystal(c, null, particleCount, profile, timestamp, launcher, gameState.spores);
              if (distortion.x !== 0 || distortion.y !== 0) {
                  this.ctx.restore();
              }
@@ -314,7 +314,8 @@ export class Renderer {
                  grad = this.ctx.createRadialGradient(0, 0, 0, 0, 0, bucketRadius);
                  const rgb = this.hexToRgb(color) || {r:255, g:255, b:255};
                  grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1.0)`);
-                 grad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`);
+                 grad.addColorStop(0.3, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`);
+                 grad.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`);
                  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
                  this._gradientCache.set(cacheKey, grad);
              }
@@ -327,7 +328,7 @@ export class Renderer {
              this.ctx.globalAlpha = prevAlpha;
         };
 
-        // 1. Crystal Lights
+        // 1. Crystal Lights — improved area light with height-based spread
         gameState.crystals.forEach(c => {
              const x = (c.lane * this.laneWidth) + (this.laneWidth / 2);
              const h = c.height * (c.scaleY || 1.0);
@@ -344,11 +345,28 @@ export class Renderer {
              // Flash intensity
              const flashBonus = c.flash * 2.0;
 
-             const radius = 150 + (flashBonus * 100);
+             const radius = 150 + (flashBonus * 100) + (h * 0.3);
              const intensity = (0.3 + (flashBonus * 0.5)) * pulse;
 
              const col = COLORS[c.colorIdx].hex;
              drawLight(x, y, col, radius, intensity);
+
+             // Secondary area light at crystal base for better vertical coverage
+             if (profile.crystalDetail === 'high') {
+                 const baseY = c.type === 'top' ? 10 : this.height - 10;
+                 drawLight(x, baseY, col, radius * 0.5, intensity * 0.25);
+             }
+
+             // Rim/edge highlight — small bright edge light after main geometry
+             if (profile.crystalDetail !== 'low' && launcher) {
+                 const dx = launcher.x - x;
+                 const dist = Math.abs(dx);
+                 if (dist < 300) {
+                     const rimFalloff = 1 - dist / 300;
+                     const rimX = x + (dx > 0 ? -15 : 15);
+                     drawLight(rimX, y, '#ffffff', 20, rimFalloff * 0.2 * pulse);
+                 }
+             }
 
              // Wall Reflections
              // If in first lane, reflect on left wall
@@ -1142,7 +1160,7 @@ export class Renderer {
         this.ctx.globalAlpha = 1.0;
     }
 
-    drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now()) {
+    drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now(), launcher = null, spores = []) {
         // JUICE: Apply stress shake to position
         const shakeX = c.shakeX || 0;
         const shakeY = c.shakeY || 0;
@@ -1169,23 +1187,77 @@ export class Renderer {
         // Perf: use solid fill instead of gradients when particle chaos is high
         const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
 
+        // Compute lighting context: direction and intensity from nearby bright objects
+        const crystalCenterY = c.type === 'top' ? (c.height * heightScale) / 2 : this.height - (c.height * heightScale) / 2;
+        let lightDirX = 0;
+        let lightDirY = 0;
+        let lightIntensity = 0;
+
+        if (!colorOverride && launcher) {
+            const dx = launcher.x - xCenter;
+            const dy = launcher.y - crystalCenterY;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const falloff = Math.max(0, 1 - dist / 500);
+            lightDirX += (dx / dist) * falloff;
+            lightDirY += (dy / dist) * falloff;
+            lightIntensity += falloff * 0.6;
+        }
+
+        if (!colorOverride && spores && spores.length > 0) {
+            for (let i = 0; i < Math.min(spores.length, 5); i++) {
+                const s = spores[i];
+                const dx = s.x - xCenter;
+                const dy = s.y - crystalCenterY;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const falloff = Math.max(0, 1 - dist / 350);
+                if (falloff > 0) {
+                    lightDirX += (dx / dist) * falloff * 0.4;
+                    lightDirY += (dy / dist) * falloff * 0.4;
+                    lightIntensity += falloff * 0.3;
+                }
+            }
+        }
+
+        lightIntensity = Math.min(lightIntensity, 1.0);
+        const lightMag = Math.sqrt(lightDirX * lightDirX + lightDirY * lightDirY) || 1;
+        const normLightX = lightDirX / lightMag;
+        const normLightY = lightDirY / lightMag;
+
         // JUICE: Critical Danger Glow
         if (c.isCritical && !colorOverride) {
             const pulse = Math.sin(timestamp / 100) * 0.5 + 0.5;
-            this.ctx.shadowBlur = 20 + (pulse * 30);
-            this.ctx.shadowColor = 'red';
+            if (profile.crystalDetail === 'low') {
+                // Skip shadowBlur on low - use fill color tinting only
+                this.ctx.shadowBlur = 0;
+            } else if (profile.crystalDetail === 'medium') {
+                this.ctx.shadowBlur = 10 + (pulse * 15);
+                this.ctx.shadowColor = 'red';
+            } else {
+                this.ctx.shadowBlur = 20 + (pulse * 30);
+                this.ctx.shadowColor = 'red';
+            }
             // Tint fill slightly red
             strokeColor = `rgba(255, 50, 50, ${0.8 + pulse * 0.2})`;
             // Aggressive visual override
             fillColor = `rgba(255, ${Math.floor(pulse * 50)}, ${Math.floor(pulse * 50)}, 0.9)`;
         } else if (c.flash > 0 && !colorOverride) {
-            // Enhanced glow effect for flash
-            this.ctx.shadowBlur = 50 * c.flash;
-            this.ctx.shadowColor = 'white';
+            if (profile.crystalDetail === 'low') {
+                this.ctx.shadowBlur = 0;
+            } else {
+                // Enhanced glow effect for flash
+                this.ctx.shadowBlur = (profile.crystalDetail === 'medium' ? 25 : 50) * c.flash;
+                this.ctx.shadowColor = 'white';
+            }
             this.ctx.fillStyle = '#fff';
             this.ctx.strokeStyle = '#fff';
         } else if (!colorOverride) {
-            this.ctx.shadowBlur = 35;
+            if (profile.crystalDetail === 'low') {
+                this.ctx.shadowBlur = 0;
+            } else if (profile.crystalDetail === 'medium') {
+                this.ctx.shadowBlur = 18;
+            } else {
+                this.ctx.shadowBlur = 35;
+            }
             this.ctx.shadowColor = col.glow;
             this.ctx.strokeStyle = strokeColor;
         } else {
@@ -1196,6 +1268,8 @@ export class Renderer {
         this.ctx.lineWidth = baseLineWidth;
         this.ctx.lineJoin = 'miter';
 
+        const time = timestamp / 1000;
+
         const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
             // Apply height scale to the crystal height
             const h = c.height * hScale * heightScale;
@@ -1205,23 +1279,35 @@ export class Renderer {
             const tipY = ((c.type === 'top') ? h : this.height - h) + shakeY;
             const cx = xCenter + offsetX;
 
+            // Compute per-facet normal (simplified 2D: direction from base center to tip)
+            const facetNormX = (tilt / 20); // normalized tilt contribution
+            const facetNormY = c.type === 'top' ? 1 : -1;
+            // Dot product with light direction for specular
+            const specularDot = Math.max(0, facetNormX * normLightX + facetNormY * normLightY * 0.5);
+            const specularStrength = specularDot * lightIntensity;
+
             if (!colorOverride) {
                 if (useSolidFill) {
                     // Perf: skip expensive gradient creation under load
                     this.ctx.fillStyle = c.flash > 0 ? '#fff' : col.hex;
                 } else {
-                    // Enhanced gradient with more depth
+                    // Enhanced gradient with more depth and light response
                     const grad = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
                     if (c.flash > 0) {
                          grad.addColorStop(0, '#fff');
                          grad.addColorStop(0.5, '#fff');
                          grad.addColorStop(1, '#fff');
                     } else {
-                         // More vibrant color gradient
-                         grad.addColorStop(0, col.hex);
+                         // Light-responsive gradient: brighter on lit side
+                         const litBoost = Math.floor(specularStrength * 40);
+                         const baseR = parseInt(col.hex.slice(1,3), 16);
+                         const baseG = parseInt(col.hex.slice(3,5), 16);
+                         const baseB = parseInt(col.hex.slice(5,7), 16);
+                         const litColor = `rgb(${Math.min(255, baseR + litBoost)}, ${Math.min(255, baseG + litBoost)}, ${Math.min(255, baseB + litBoost)})`;
+                         grad.addColorStop(0, litColor);
                          grad.addColorStop(0.4, col.hex);
                          grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
-                         grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+                         grad.addColorStop(1, 'rgba(0,0,0,0.25)');
                     }
                     this.ctx.fillStyle = grad;
                 }
@@ -1290,8 +1376,9 @@ export class Renderer {
 
             // Enhanced internal facets with multiple layers
             if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low') {
-                // Primary highlight facet
-                this.ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                // Primary highlight facet - modulated by light direction
+                const highlightAlpha = 0.2 + specularStrength * 0.25;
+                this.ctx.fillStyle = `rgba(255,255,255,${highlightAlpha.toFixed(2)})`;
                 this.ctx.beginPath();
                 this.ctx.moveTo(cx - halfW*0.6, baseY);
                 if (c.type === 'top') {
@@ -1303,7 +1390,7 @@ export class Renderer {
                 this.ctx.fill();
 
                 // Secondary highlight for crystalline effect
-                this.ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                this.ctx.fillStyle = `rgba(255,255,255,${(0.1 + specularStrength * 0.15).toFixed(2)})`;
                 this.ctx.beginPath();
                 this.ctx.moveTo(cx + halfW*0.2, baseY);
                 if (c.type === 'top') {
@@ -1326,17 +1413,132 @@ export class Renderer {
                 this.ctx.lineWidth = baseLineWidth;
             }
 
+            // Rim lighting (medium+high) — edge glow from nearby light sources
+            if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low' && lightIntensity > 0.1) {
+                const rimSide = normLightX > 0 ? -1 : 1; // Rim appears opposite to light
+                const rimAlpha = (lightIntensity * 0.35).toFixed(2);
+                this.ctx.strokeStyle = `rgba(255,255,255,${rimAlpha})`;
+                this.ctx.lineWidth = 1.5;
+                this.ctx.beginPath();
+                if (c.type === 'top') {
+                    this.ctx.moveTo(cx + rimSide * halfW, baseY);
+                    this.ctx.lineTo(cx + tilt + rimSide * halfW * 0.1, tipY);
+                } else {
+                    this.ctx.moveTo(cx + rimSide * halfW, baseY);
+                    this.ctx.lineTo(cx + tilt + rimSide * halfW * 0.1, tipY);
+                }
+                this.ctx.stroke();
+                this.ctx.lineWidth = baseLineWidth;
+            }
+
+            // Dynamic specular catch-light (high only)
+            if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill && lightIntensity > 0.15) {
+                const catchLightY = c.type === 'top'
+                    ? baseY + (tipY - baseY) * (0.3 + normLightY * 0.2)
+                    : baseY - (baseY - tipY) * (0.3 - normLightY * 0.2);
+                const catchLightX = cx + normLightX * halfW * 0.3;
+                const catchSize = halfW * 0.15 * (1 + specularStrength);
+                const catchAlpha = (specularStrength * 0.6).toFixed(2);
+                const catchGrad = this.ctx.createRadialGradient(catchLightX, catchLightY, 0, catchLightX, catchLightY, catchSize);
+                catchGrad.addColorStop(0, `rgba(255,255,255,${catchAlpha})`);
+                catchGrad.addColorStop(1, 'rgba(255,255,255,0)');
+                this.ctx.fillStyle = catchGrad;
+                this.ctx.beginPath();
+                this.ctx.arc(catchLightX, catchLightY, catchSize, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+
+            // High-detail sheen with time-varying caustics
             if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill) {
+                // Caustic/refraction pattern that shifts with time and breathing
+                const causticOffset = Math.sin(time * 1.5 + c.lightPhase) * 0.15;
+                const sheenStop1 = 0.3 + causticOffset;
+                const sheenStop2 = 0.55 + causticOffset * 0.5;
                 const sheen = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
                 sheen.addColorStop(0, 'rgba(255,255,255,0)');
-                sheen.addColorStop(0.35, 'rgba(180,255,255,0.18)');
-                sheen.addColorStop(0.6, 'rgba(255,160,255,0.16)');
+                sheen.addColorStop(Math.max(0.05, sheenStop1), 'rgba(180,255,255,0.2)');
+                sheen.addColorStop(Math.min(0.95, sheenStop2), 'rgba(255,160,255,0.18)');
                 sheen.addColorStop(1, 'rgba(255,255,255,0)');
                 this.ctx.fillStyle = sheen;
                 this.ctx.beginPath();
                 this.ctx.moveTo(cx - halfW * 0.25, baseY);
                 this.ctx.lineTo(cx + tilt * 0.65, c.type === 'top' ? (baseY + (tipY - baseY) * 0.72) : (baseY - (baseY - tipY) * 0.72));
                 this.ctx.lineTo(cx + halfW * 0.25, baseY);
+                this.ctx.closePath();
+                this.ctx.fill();
+            }
+
+            // Internal cracks for taller crystals (high only, seeded)
+            if (!colorOverride && profile.crystalDetail === 'high' && c.height > 80 && !useSolidFill) {
+                const crackCount = Math.min(4, Math.floor((c.height - 80) / 40) + 1);
+                const crackSeed = c.crackSeed || seed;
+                this.ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                this.ctx.lineWidth = 0.5;
+                for (let ci = 0; ci < crackCount; ci++) {
+                    const t = ((crackSeed * 7 + ci * 0.31) % 1);
+                    const crackStartY = c.type === 'top'
+                        ? baseY + (tipY - baseY) * (0.2 + t * 0.5)
+                        : baseY - (baseY - tipY) * (0.2 + t * 0.5);
+                    const crackEndY = c.type === 'top'
+                        ? crackStartY + (tipY - baseY) * 0.25
+                        : crackStartY - (baseY - tipY) * 0.25;
+                    const crackX = cx + (t - 0.5) * halfW * 0.8;
+                    const crackMidX = crackX + ((crackSeed * 3 + ci) % 1 - 0.5) * halfW * 0.3;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(crackX, crackStartY);
+                    this.ctx.lineTo(crackMidX, (crackStartY + crackEndY) / 2);
+                    this.ctx.lineTo(crackX + (crackMidX - crackX) * 0.5, crackEndY);
+                    this.ctx.stroke();
+                }
+                this.ctx.lineWidth = baseLineWidth;
+            }
+
+            // Critical state: danger cracks with pulsing internal "lava" lines
+            if (c.isCritical && !colorOverride && profile.crystalDetail !== 'low') {
+                const dangerPulse = Math.sin(timestamp / 80) * 0.5 + 0.5;
+                const dangerAlpha = (0.3 + dangerPulse * 0.5).toFixed(2);
+                this.ctx.strokeStyle = `rgba(255, ${Math.floor(30 + dangerPulse * 50)}, 0, ${dangerAlpha})`;
+                this.ctx.lineWidth = 1.5;
+                const crackSeed = c.crackSeed || seed;
+                // Draw 2-3 animated danger cracks
+                for (let ci = 0; ci < 3; ci++) {
+                    const t = ((crackSeed * 5 + ci * 0.37) % 1);
+                    const startProgress = 0.15 + t * 0.3;
+                    const endProgress = startProgress + 0.3 + dangerPulse * 0.1;
+                    const crackStartY = c.type === 'top'
+                        ? baseY + (tipY - baseY) * startProgress
+                        : baseY - (baseY - tipY) * startProgress;
+                    const crackEndY = c.type === 'top'
+                        ? baseY + (tipY - baseY) * Math.min(0.9, endProgress)
+                        : baseY - (baseY - tipY) * Math.min(0.9, endProgress);
+                    const crackX = cx + (t - 0.5) * halfW * 0.6;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(crackX, crackStartY);
+                    this.ctx.lineTo(crackX + Math.sin(timestamp / 200 + ci) * halfW * 0.15, (crackStartY + crackEndY) / 2);
+                    this.ctx.lineTo(crackX, crackEndY);
+                    this.ctx.stroke();
+                }
+                this.ctx.lineWidth = baseLineWidth;
+            }
+
+            // Match flash: energized cleansed sheen
+            if (!colorOverride && c.matchFlash > 0 && profile.crystalDetail !== 'low') {
+                const mAlpha = (c.matchFlash * 0.4).toFixed(2);
+                const mGrad = this.ctx.createLinearGradient(cx - halfW, tipY, cx + halfW, baseY);
+                mGrad.addColorStop(0, `rgba(255,255,255,${mAlpha})`);
+                mGrad.addColorStop(0.5, `rgba(200,255,240,${(c.matchFlash * 0.25).toFixed(2)})`);
+                mGrad.addColorStop(1, 'rgba(255,255,255,0)');
+                this.ctx.fillStyle = mGrad;
+                this.ctx.beginPath();
+                if (c.type === 'top') {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    this.ctx.lineTo(cx + halfW, baseY);
+                } else {
+                    this.ctx.moveTo(cx - halfW, baseY);
+                    this.ctx.lineTo(cx + tilt, tipY);
+                    this.ctx.lineTo(cx + halfW, baseY);
+                }
                 this.ctx.closePath();
                 this.ctx.fill();
             }
@@ -1385,6 +1587,24 @@ export class Renderer {
         config.shards.forEach(shard => {
             drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
         });
+
+        // Post-geometry: layered soft glow (replaces some shadowBlur dependency)
+        if (!colorOverride && profile.crystalDetail !== 'low' && !useSolidFill && c.flash < 0.3) {
+            const glowCenterY = c.type === 'top' ? (c.height * heightScale * 0.4) : (this.height - c.height * heightScale * 0.4);
+            const glowRadius = width * 0.6;
+            const rgb = this.hexToRgb(col.hex) || {r:255, g:255, b:255};
+            const prevOp = this.ctx.globalCompositeOperation;
+            this.ctx.globalCompositeOperation = 'lighter';
+            const glowGrad = this.ctx.createRadialGradient(xCenter, glowCenterY, 0, xCenter, glowCenterY, glowRadius);
+            glowGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`);
+            glowGrad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.05)`);
+            glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            this.ctx.fillStyle = glowGrad;
+            this.ctx.beginPath();
+            this.ctx.arc(xCenter, glowCenterY, glowRadius, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.globalCompositeOperation = prevOp;
+        }
 
         this.ctx.shadowBlur = 0;
     }
