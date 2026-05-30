@@ -2,10 +2,24 @@ import { COLORS, GAME_CONFIG } from './Constants.js';
 
 const FILM_GRAIN_REFRESH_INTERVAL_MS = 90;
 const EMERGENCY_PARTICLE_STRIDE_BOOST = 1;
+// Maximum number of explosion particles sampled for bloom — caps cost during chaos
+const MAX_BLOOM_PARTICLES = 40;
 const RENDER_QUALITY_PROFILES = {
-    high: { maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50, crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true },
-    medium: { maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65, crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false },
-    low: { maxDust: 55, maxParticles: 420, particleStride: 2, gridBase: 90, crystalDetail: 'low', postFX: false, lightShafts: false, fog: true, allowGridDistortion: false }
+    high: {
+        maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50,
+        crystalDetail: 'high', postFX: true, lightShafts: true, fog: true, allowGridDistortion: true,
+        bloom: true, bloomStrength: 0.85, grainAmount: 1.0, colorGrade: true, scanlineBase: 0.08
+    },
+    medium: {
+        maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65,
+        crystalDetail: 'medium', postFX: true, lightShafts: true, fog: true, allowGridDistortion: false,
+        bloom: false, bloomStrength: 0.0, grainAmount: 0.65, colorGrade: true, scanlineBase: 0.04
+    },
+    low: {
+        maxDust: 55, maxParticles: 420, particleStride: 2, gridBase: 90,
+        crystalDetail: 'low', postFX: false, lightShafts: false, fog: true, allowGridDistortion: false,
+        bloom: false, bloomStrength: 0.0, grainAmount: 0.0, colorGrade: false, scanlineBase: 0.0
+    }
 };
 
 export class Renderer {
@@ -32,15 +46,25 @@ export class Renderer {
         this._glitchRects = [];
         this._glitchIntensity = -1;
 
-        // Cache for vignette gradient (invalidated on resize)
+        // Cache for vignette gradients (invalidated on resize)
         this._vignetteGradient = null;
+        this._baseVignetteGradient = null;
         this._fogGradient = null;
         this._qualityProfiles = RENDER_QUALITY_PROFILES;
+
+        // Film grain: upgraded to 256×256 for higher-quality multi-octave noise
         this._grainCanvas = document.createElement('canvas');
-        this._grainCanvas.width = 128;
-        this._grainCanvas.height = 128;
+        this._grainCanvas.width = 256;
+        this._grainCanvas.height = 256;
         this._grainCtx = this._grainCanvas.getContext('2d');
         this._grainPattern = null;
+
+        // Bloom offscreen buffer at 1/4 resolution
+        this._bloomCanvas = document.createElement('canvas');
+        this._bloomCanvas.width = Math.max(4, Math.floor(canvas.width / 4));
+        this._bloomCanvas.height = Math.max(4, Math.floor(canvas.height / 4));
+        this._bloomCtx = this._bloomCanvas.getContext('2d');
+        this._bloomGradCache = new Map();
     }
 
     resize(w, h) {
@@ -49,8 +73,13 @@ export class Renderer {
         this.canvas.width = w;
         this.canvas.height = h;
         this.laneWidth = w / GAME_CONFIG.lanes;
-        this._vignetteGradient = null; // invalidate cached gradient
+        this._vignetteGradient = null; // invalidate cached gradients
+        this._baseVignetteGradient = null;
         this._fogGradient = null;
+        // Resize bloom buffer to match new resolution
+        this._bloomCanvas.width = Math.max(4, Math.floor(w / 4));
+        this._bloomCanvas.height = Math.max(4, Math.floor(h / 4));
+        this._bloomGradCache.clear();
     }
 
     clear() {
@@ -230,29 +259,34 @@ export class Renderer {
 
         this.ctx.restore();
 
-        // JUICE: Holographic Glitch & Scanlines
-        if (profile.postFX && gameState.criticalIntensity > 0.01) {
-             this.drawScanlines(gameState.criticalIntensity);
-             if (gameState.criticalIntensity > 0.2) {
-                 this.drawGlitch(gameState.criticalIntensity);
-             }
+        // --- Cinematic Post-Processing Stack ---
+
+        // 1. Bloom — bright elements bleed into fog and environment (high only)
+        if (profile.bloom) {
+            this.drawBloom(gameState, profile, timestamp);
         }
 
-        // JUICE: Red Alert Vignette
-        if (gameState.criticalIntensity > 0.01) {
+        // 2. Enhanced light shafts (reactive to crystals and explosions)
+        if (profile.lightShafts) {
+            this.drawLightShafts(gameState, launcher, timestamp);
+        }
+
+        // 3. Dynamic color grading — contrast/saturation shift by danger and combo
+        if (profile.colorGrade) {
+            this.drawColorGrade(gameState, timestamp);
+        }
+
+        // 4. Unified film pass — grain, vignette, scanlines, glitch
+        if (profile.postFX) {
+            this.drawFilmPass(gameState, timestamp, profile);
+        } else if (gameState.criticalIntensity > 0.01) {
+            // Always show danger vignette, even on low quality
             this.drawVignette(gameState.criticalIntensity, timestamp);
         }
 
-        // Draw Impact Flash (independent of shake translation)
+        // 5. Impact flash (always active when triggered, on top of everything)
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
-        }
-
-        if (profile.lightShafts) {
-            this.drawLightShafts(gameState, launcher);
-        }
-        if (profile.postFX) {
-            this.drawFilmGrain(timestamp);
         }
     }
 
@@ -485,53 +519,327 @@ export class Renderer {
         this.ctx.fillStyle = prevFillStyle;
     }
 
-    drawLightShafts(gameState, launcher) {
+    drawLightShafts(gameState, launcher, timestamp = 0) {
+        const time = timestamp / 1000;
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'screen';
-        this.ctx.globalAlpha = 0.16;
+
+        // --- Collect shaft sources ---
+        const sources = [];
+
+        // Primary source: launcher target lane
         const lane = launcher ? launcher.targetLane : Math.floor(GAME_CONFIG.lanes / 2);
         const centerX = (lane * this.laneWidth) + (this.laneWidth / 2);
-        for (let i = -1; i <= 1; i++) {
-            const x = centerX + (i * this.laneWidth * 0.8);
-            const shaft = this.ctx.createLinearGradient(x, 0, x, this.height * 0.65);
-            shaft.addColorStop(0, 'rgba(180, 255, 255, 0.5)');
-            shaft.addColorStop(1, 'rgba(180, 255, 255, 0)');
-            this.ctx.fillStyle = shaft;
-            this.ctx.beginPath();
-            this.ctx.moveTo(x - 50, 0);
-            this.ctx.lineTo(x + 50, 0);
-            this.ctx.lineTo(x + 180, this.height * 0.65);
-            this.ctx.lineTo(x - 180, this.height * 0.65);
-            this.ctx.closePath();
-            this.ctx.fill();
+        sources.push({ x: centerX, intensity: 0.13, r: 180, g: 255, b: 255 });
+
+        // Crystal sources: brightest / tallest crystals add secondary shafts
+        for (let i = 0; i < gameState.crystals.length && sources.length < 5; i++) {
+            const c = gameState.crystals[i];
+            if (c.flash < 0.05 && c.height < 90) continue;
+            const cx = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+            const col = COLORS[c.colorIdx];
+            const rgb = this.hexToRgb(col.hex) || { r: 180, g: 255, b: 255 };
+            const intensity = 0.055 + c.flash * 0.10;
+            sources.push({ x: cx, intensity, r: rgb.r, g: rgb.g, b: rgb.b });
         }
+
+        // Explosion sources: active shockwaves near the top half add brief bright shafts
+        if (gameState.shockwaves) {
+            for (let i = 0; i < gameState.shockwaves.length && sources.length < 7; i++) {
+                const sw = gameState.shockwaves[i];
+                if (sw.life <= 0.25 || sw.y > this.height * 0.55) continue;
+                sources.push({ x: sw.x, intensity: sw.life * 0.14, r: 255, g: 230, b: 180 });
+            }
+        }
+
+        // --- Draw shafts for each source ---
+        for (let si = 0; si < sources.length; si++) {
+            const { x, intensity, r, g, b } = sources[si];
+
+            for (let i = -1; i <= 1; i++) {
+                // Animate shaft direction and width with per-shaft noise
+                const angleNoise = Math.sin(time * 0.65 + i * 1.3 + si) * 0.025;
+                const widthMod = 1 + Math.sin(time * 1.05 + i * 0.85 + si * 0.7) * 0.14;
+                const opacityPulse = intensity * (0.8 + Math.sin(time * 2.2 + i * 2.0 + si) * 0.2);
+
+                const sx = x + (i * this.laneWidth * 0.8);
+                const topW = 45 * widthMod;
+                const botW = 175 * widthMod;
+                const shaftH = this.height * 0.68;
+                const angOff = angleNoise * shaftH * 0.35;
+
+                const shaft = this.ctx.createLinearGradient(sx, 0, sx, shaftH);
+                shaft.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.45)`);
+                shaft.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, 0.18)`);
+                shaft.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                this.ctx.globalAlpha = opacityPulse;
+                this.ctx.fillStyle = shaft;
+                this.ctx.beginPath();
+                this.ctx.moveTo(sx - topW, 0);
+                this.ctx.lineTo(sx + topW, 0);
+                this.ctx.lineTo(sx + botW + angOff, shaftH);
+                this.ctx.lineTo(sx - botW + angOff, shaftH);
+                this.ctx.closePath();
+                this.ctx.fill();
+
+                // Dust motes in the beam: overlay grain texture inside the primary shaft only.
+                // Limiting to si===0 avoids redundant fills for secondary crystal/explosion shafts.
+                if (this._grainPattern && si === 0) {
+                    this.ctx.globalAlpha = opacityPulse * 0.08;
+                    this.ctx.fillStyle = this._grainPattern;
+                    this.ctx.fill();
+                }
+            }
+        }
+
+        this.ctx.globalAlpha = 1.0;
         this.ctx.restore();
     }
 
-    drawFilmGrain(timestamp) {
+    drawFilmGrain(timestamp, grainAmount = 1.0) {
+        if (grainAmount <= 0) return;
         if (!this._lastGrainRefresh || timestamp - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
-            const img = this._grainCtx.createImageData(128, 128);
+            const size = 256;
+            const img = this._grainCtx.createImageData(size, size);
             for (let i = 0; i < img.data.length; i += 4) {
-                const v = Math.floor(Math.random() * 30);
+                // Multi-octave noise: coarse grain + fine grain for realistic film texture
+                const coarse = Math.random() * 28;
+                const fine = Math.random() * 14;
+                const v = Math.floor(coarse * 0.65 + fine * 0.35);
                 img.data[i] = v;
                 img.data[i + 1] = v;
                 img.data[i + 2] = v;
-                img.data[i + 3] = 20;
+                img.data[i + 3] = Math.floor(16 + Math.random() * 10);
             }
             this._grainCtx.putImageData(img, 0, 0);
             this._grainPattern = this.ctx.createPattern(this._grainCanvas, 'repeat');
             this._lastGrainRefresh = timestamp;
         }
+        if (!this._grainPattern) return;
         const prevComposite = this.ctx.globalCompositeOperation;
         const prevAlpha = this.ctx.globalAlpha;
         const prevFillStyle = this.ctx.fillStyle;
-        this.ctx.globalCompositeOperation = 'overlay';
-        this.ctx.globalAlpha = 0.12;
         this.ctx.fillStyle = this._grainPattern;
+        // First pass: overlay for mid-tone grain texture
+        this.ctx.globalCompositeOperation = 'overlay';
+        this.ctx.globalAlpha = 0.11 * grainAmount;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        // Second pass: screen for bright grain "sparkle"
+        this.ctx.globalCompositeOperation = 'screen';
+        this.ctx.globalAlpha = 0.04 * grainAmount;
         this.ctx.fillRect(0, 0, this.width, this.height);
         this.ctx.globalCompositeOperation = prevComposite;
         this.ctx.globalAlpha = prevAlpha;
         this.ctx.fillStyle = prevFillStyle;
+    }
+
+    // --- New Cinematic Post-Processing Methods ---
+
+    drawBloom(gameState, profile, timestamp) {
+        const bw = this._bloomCanvas.width;
+        const bh = this._bloomCanvas.height;
+        const sx = bw / this.width;
+        const sy = bh / this.height;
+        const bctx = this._bloomCtx;
+        const strength = profile.bloomStrength || 0.85;
+
+        // Clear bloom buffer each frame
+        bctx.clearRect(0, 0, bw, bh);
+        bctx.globalCompositeOperation = 'lighter';
+
+        // Helper: draw a soft radial glow blob on the bloom canvas.
+        // Cache key uses coarse color buckets (64-unit) and radius buckets (16-unit)
+        // to maximise hit rate across similar-coloured crystals.
+        const drawBlob = (bx, by, radius, r, g, b, alpha) => {
+            const cacheKey = `${Math.floor(r/64)*64}-${Math.floor(g/64)*64}-${Math.floor(b/64)*64}-${Math.floor(radius/16)*16}`;
+            let grad = this._bloomGradCache.get(cacheKey);
+            if (!grad) {
+                grad = bctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+                grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
+                grad.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, 0.35)`);
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                this._bloomGradCache.set(cacheKey, grad);
+            }
+            bctx.save();
+            bctx.globalAlpha = alpha;
+            bctx.translate(bx, by);
+            bctx.scale(radius, radius);
+            bctx.fillStyle = grad;
+            bctx.beginPath();
+            bctx.arc(0, 0, 1, 0, Math.PI * 2);
+            bctx.fill();
+            bctx.restore();
+        };
+
+        // Crystal bloom sources — size based on height and flash
+        for (let i = 0; i < gameState.crystals.length; i++) {
+            const c = gameState.crystals[i];
+            const cx = ((c.lane * this.laneWidth) + (this.laneWidth / 2)) * sx;
+            const h = c.height * (c.scaleY || 1.0);
+            const cy = c.type === 'top' ? (h - 20) * sy : (this.height - h + 20) * sy;
+            const flashBonus = c.flash * 2.0;
+            const radius = (140 + flashBonus * 110 + h * 0.32) * sx * 1.8;
+            const alpha = Math.min(1, (0.28 + flashBonus * 0.7) * strength);
+            const col = COLORS[c.colorIdx];
+            const rgb = this.hexToRgb(col.hex) || { r: 255, g: 255, b: 255 };
+            drawBlob(cx, cy, radius, rgb.r, rgb.g, rgb.b, alpha);
+        }
+
+        // Spore bloom sources
+        for (let i = 0; i < gameState.spores.length; i++) {
+            const s = gameState.spores[i];
+            const cx = s.x * sx;
+            const cy = s.y * sy;
+            const radius = s.radius * sx * 7;
+            const col = COLORS[s.colorIdx];
+            const rgb = this.hexToRgb(col.hex) || { r: 255, g: 255, b: 255 };
+            drawBlob(cx, cy, radius, rgb.r, rgb.g, rgb.b, 0.75 * strength);
+        }
+
+        // Explosion bloom from high-life, large particles
+        if (gameState.particles) {
+            const limit = Math.min(gameState.particles.length, MAX_BLOOM_PARTICLES);
+            for (let i = 0; i < limit; i++) {
+                const p = gameState.particles[i];
+                if (p.size <= 3) continue;
+                const alpha = (p.life / p.maxLife) * 0.35 * strength;
+                if (alpha <= 0) continue;
+                const radius = p.size * sx * 3.5;
+                bctx.globalAlpha = alpha;
+                bctx.fillStyle = p.color;
+                bctx.beginPath();
+                bctx.arc(p.x * sx, p.y * sy, radius, 0, Math.PI * 2);
+                bctx.fill();
+            }
+            bctx.globalAlpha = 1.0;
+        }
+
+        // Impact flash bloom — fill entire bloom canvas when flash is strong
+        if (gameState.impactFlash > 0.15) {
+            bctx.globalAlpha = gameState.impactFlash * 0.4 * strength;
+            bctx.fillStyle = gameState.impactFlashColor || '#ffffff';
+            bctx.fillRect(0, 0, bw, bh);
+            bctx.globalAlpha = 1.0;
+        }
+
+        bctx.globalCompositeOperation = 'source-over';
+
+        // Composite bloom onto main canvas at full resolution using 'lighter'.
+        // Natural bilinear upscale (1/4 → full) creates the soft bleed effect.
+        // Two passes at different weights to separate wide soft bleed from core brightness.
+        const ctx = this.ctx;
+        const prevOp = ctx.globalCompositeOperation;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = strength * 0.42;
+        ctx.drawImage(this._bloomCanvas, 0, 0, this.width, this.height);
+        // Second pass at lower weight adds extra core brightness without blowing out edges
+        ctx.globalAlpha = strength * 0.18;
+        ctx.drawImage(this._bloomCanvas, 0, 0, this.width, this.height);
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = prevOp;
+    }
+
+    drawColorGrade(gameState, timestamp) {
+        const time = timestamp / 1000;
+        const prevOp = this.ctx.globalCompositeOperation;
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFill = this.ctx.fillStyle;
+
+        // Base atmospheric grade: subtle cool-blue tint reinforces cave feel
+        this.ctx.globalCompositeOperation = 'multiply';
+        this.ctx.globalAlpha = 0.045;
+        if (!this._colorGradeBaseGrad || this._colorGradeBaseGradH !== this.height) {
+            this._colorGradeBaseGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
+            this._colorGradeBaseGrad.addColorStop(0, 'rgba(150, 190, 255, 1)');
+            this._colorGradeBaseGrad.addColorStop(1, 'rgba(70, 110, 200, 1)');
+            this._colorGradeBaseGradH = this.height;
+        }
+        this.ctx.fillStyle = this._colorGradeBaseGrad;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // Danger grade: warm orange-red tint, grows with criticalIntensity
+        const danger = gameState.criticalIntensity || 0;
+        if (danger > 0) {
+            this.ctx.globalCompositeOperation = 'overlay';
+            this.ctx.globalAlpha = danger * 0.10;
+            this.ctx.fillStyle = 'rgba(255, 55, 0, 1)';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+            // Lift blacks slightly for "blown-out" look at high danger
+            this.ctx.globalCompositeOperation = 'screen';
+            this.ctx.globalAlpha = danger * 0.04;
+            this.ctx.fillStyle = 'rgba(80, 10, 0, 1)';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // Combo grade: warm golden shimmer at high combo
+        const combo = gameState.combo || 0;
+        if (combo > 2) {
+            const comboT = Math.min(1, (combo - 2) / 8);
+            const shimmer = 0.5 + 0.5 * Math.sin(time * 3.5);
+            this.ctx.globalCompositeOperation = 'screen';
+            this.ctx.globalAlpha = comboT * 0.055 * shimmer;
+            if (!this._colorGradeComboGrad || this._colorGradeComboGradW !== this.width) {
+                this._colorGradeComboGrad = this.ctx.createLinearGradient(0, 0, this.width, this.height);
+                this._colorGradeComboGrad.addColorStop(0, 'rgba(255, 210, 60, 1)');
+                this._colorGradeComboGrad.addColorStop(1, 'rgba(255, 130, 30, 1)');
+                this._colorGradeComboGradW = this.width;
+            }
+            this.ctx.fillStyle = this._colorGradeComboGrad;
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        this.ctx.globalCompositeOperation = prevOp;
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.fillStyle = prevFill;
+    }
+
+    _drawBaseVignette() {
+        // Subtle permanent dark vignette for cinematic framing
+        if (!this._baseVignetteGradient) {
+            const radius = Math.max(this.width, this.height);
+            this._baseVignetteGradient = this.ctx.createRadialGradient(
+                this.width / 2, this.height / 2, this.height * 0.28,
+                this.width / 2, this.height / 2, radius * 0.92
+            );
+            this._baseVignetteGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            this._baseVignetteGradient.addColorStop(1, 'rgba(0, 0, 10, 0.58)');
+        }
+        const prevAlpha = this.ctx.globalAlpha;
+        const prevFill = this.ctx.fillStyle;
+        this.ctx.globalAlpha = 1.0;
+        this.ctx.fillStyle = this._baseVignetteGradient;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.globalAlpha = prevAlpha;
+        this.ctx.fillStyle = prevFill;
+    }
+
+    drawFilmPass(gameState, timestamp, profile) {
+        const grainAmount = profile.grainAmount || 0;
+
+        // 1. Permanent base vignette for cinematic framing
+        this._drawBaseVignette();
+
+        // 2. Critical danger vignette (pulsing red)
+        if (gameState.criticalIntensity > 0.01) {
+            this.drawVignette(gameState.criticalIntensity, timestamp);
+        }
+
+        // 3. Scanlines — subtly always present; more pronounced during critical.
+        // Base intensity is set per quality profile (scanlineBase) for independent tuning.
+        const scanlineBase = profile.scanlineBase || 0;
+        const scanlineIntensity = Math.min(1.0, scanlineBase + (gameState.criticalIntensity || 0) * 0.28);
+        this.drawScanlines(scanlineIntensity);
+
+        // 4. Glitch — only during high danger
+        if ((gameState.criticalIntensity || 0) > 0.2) {
+            this.drawGlitch(gameState.criticalIntensity);
+        }
+
+        // 5. Multi-octave film grain
+        if (grainAmount > 0) {
+            this.drawFilmGrain(timestamp, grainAmount);
+        }
     }
 
     drawHoloGrid(gameState, launcher, profile, timestamp) {
