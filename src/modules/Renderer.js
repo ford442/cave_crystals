@@ -1187,9 +1187,9 @@ export class Renderer {
         // Elastic spawn scale — with slight overshoot for extra juiciness
         let scale = 1.0;
         if (s.spawnTime) {
-            const age = (time - s.spawnTime) / 450; // slightly faster for snappier feel
+            const age = (time - s.spawnTime) / 450; // 450ms: snappier than 500ms default
             if (age < 1.0) {
-                // Elastic ease out with amplified overshoot
+                // Elastic ease out with amplified period (2.8 vs 3.0) for wider overshoot
                 const c4 = (2 * Math.PI) / 2.8;
                 scale = age === 0 ? 0 : age === 1 ? 1 : Math.pow(2, -9 * age) * Math.sin((age * 10 - 0.75) * c4) + 1;
                 scale = Math.max(0, scale);
@@ -1197,6 +1197,7 @@ export class Renderer {
         }
 
         // In-flight energy wobble — sinusoidal scale pulse while traveling
+        // 0.35: wobble frequency (≈ 2 cycles per second at 60fps), 0.06: ±6% size pulse
         const inFlightAge = s.inFlightAge || 0;
         const wobbleScale = 1.0 + Math.sin(inFlightAge * 0.35 + (s.wobblePhase || 0)) * 0.06;
         const baseRadius = s.radius * scale * wobbleScale;

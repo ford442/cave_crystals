@@ -467,8 +467,9 @@ export class Game {
         const timeScale = this.state.timeScale;
 
         // Spring-based shake decay — natural overshoot and settle
+        // k=0.15 (stiffness), damping=0.82 (allows slight ring-out)
         if (this.state.shake > 0 || Math.abs(this.state.shakeVel) > 0.01) {
-            this.state.shakeVel += (0 - this.state.shake) * 0.15;
+            this.state.shakeVel += (-this.state.shake) * 0.15;
             this.state.shakeVel *= 0.82;
             this.state.shake += this.state.shakeVel;
             if (this.state.shake < 0.3 && Math.abs(this.state.shakeVel) < 0.1) {
@@ -498,6 +499,7 @@ export class Game {
         }
 
         // Spring-based zoom decay — natural settle with slight overshoot
+        // k=0.12 (softer than shake), damping=0.80 (allows gentle ring-out)
         if (this.state.zoom !== 1.0 || Math.abs(this.state.zoomVel) > 0.0001) {
             this.state.zoomVel += (1.0 - this.state.zoom) * 0.12;
             this.state.zoomVel *= 0.80;

@@ -7,7 +7,9 @@
 export function easeOutElastic(t) {
     if (t === 0) return 0;
     if (t === 1) return 1;
+    // c4 controls oscillation period: 2π/3 ≈ one full overshoot cycle over t=1
     const c4 = (2 * Math.PI) / 3;
+    // 2^(-10t) decays the amplitude; sin gives the oscillation
     return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
 }
 
@@ -17,9 +19,9 @@ export function easeOutElastic(t) {
  * overshoot: controls amount of overshoot (default 1.70158)
  */
 export function easeOutBack(t, overshoot = 1.70158) {
-    const c1 = overshoot;
-    const c3 = c1 + 1;
-    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    const s = overshoot;        // overshoot coefficient
+    const c = s + 1;            // cubic coefficient derived from overshoot
+    return 1 + c * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2);
 }
 
 /**
@@ -37,9 +39,14 @@ export function easeOutQuart(t) {
 }
 
 /**
- * Spring step helper — advances a spring toward a target.
- * Returns { pos, vel } after one step.
- * k: spring constant (stiffness), d: damping [0..1], timeScale: frame scale
+ * Spring step helper — advances a spring toward a target by one timestep.
+ * @param {number} pos   - current position
+ * @param {number} vel   - current velocity
+ * @param {number} target - spring rest position
+ * @param {number} k     - spring stiffness (0..1; higher = stiffer)
+ * @param {number} d     - damping per unit time (0..1; lower = more oscillation)
+ * @param {number} timeScale - frame time scale for consistent feel under slow-mo
+ * @returns {{ pos: number, vel: number }} updated position and velocity
  */
 export function springStep(pos, vel, target, k, d, timeScale) {
     const force = (target - pos) * k;
