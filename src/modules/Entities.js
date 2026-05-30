@@ -27,6 +27,10 @@ export class Crystal {
         this.shakeX = 0;
         this.shakeY = 0;
 
+        // Advanced visual state
+        this.matchFlash = 0; // Energized sheen after match (fades over time)
+        this.crackSeed = Math.random(); // Seeded internal crack pattern
+
         // Cache shard config index to avoid per-frame lookup in renderer
         this.shardConfigIndex = this._getShardConfigIndex();
     }
@@ -45,6 +49,7 @@ export class Crystal {
         this.age += timeScale;
 
         if(this.flash > 0) this.flash -= 0.1 * timeScale;
+        if(this.matchFlash > 0) this.matchFlash -= 0.02 * timeScale;
 
         // Handle spawn delay
         if (!this.hasSpawned) {
@@ -144,6 +149,7 @@ export class Spore {
                 SoundManager.match();
                 topCry.height = wasmManager.calculateMatchHeight(topCry.height, GAME_CONFIG.matchShrink, 10);
                 topCry.flash = 1;
+                topCry.matchFlash = 1.0; // Energized sheen on match
                 // JUICE: Squash on impact
                 topCry.velScaleY -= 0.3; // Compress vertical
                 topCry.velScaleX += 0.2; // Expand horizontal
@@ -178,6 +184,7 @@ export class Spore {
                 SoundManager.match();
                 botCry.height = wasmManager.calculateMatchHeight(botCry.height, GAME_CONFIG.matchShrink, 10);
                 botCry.flash = 1;
+                botCry.matchFlash = 1.0; // Energized sheen on match
                 // JUICE: Squash on impact
                 botCry.velScaleY -= 0.3;
                 botCry.velScaleX += 0.2;
