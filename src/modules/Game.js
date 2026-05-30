@@ -52,6 +52,7 @@ export class Game {
             nextSporeColorIdx: 0,
             growthMultiplier: 1,
             shake: 0,
+            shakeVel: 0, // Spring velocity for natural shake settle
             displayScore: 0,
             impactFlash: 0,
             impactFlashColor: '#fff',
@@ -61,6 +62,7 @@ export class Game {
             combo: 0,
             comboTimer: 0,
             zoom: 1.0,
+            zoomVel: 0, // Spring velocity for natural zoom settle
             zoomFocus: { x: 0, y: 0 },
             criticalIntensity: 0,
             heartbeatTimer: 0,
@@ -466,11 +468,16 @@ export class Game {
         }
         const timeScale = this.state.timeScale;
 
-        // Shake decay (affected by timeScale?) - No, shake is visual and should probably remain snappy or maybe decay slower?
-        // Let's keep shake decay independent of timeScale for visceral feel
-        if (this.state.shake > 0) {
-            this.state.shake *= 0.9;
-            if (this.state.shake < 0.5) this.state.shake = 0;
+        // Spring-based shake decay — natural overshoot and settle
+        // k=0.15 (stiffness), damping=0.82 (allows slight ring-out)
+        if (this.state.shake > 0 || Math.abs(this.state.shakeVel) > 0.01) {
+            this.state.shakeVel += (-this.state.shake) * 0.15;
+            this.state.shakeVel *= 0.82;
+            this.state.shake += this.state.shakeVel;
+            if (this.state.shake < 0.3 && Math.abs(this.state.shakeVel) < 0.1) {
+                this.state.shake = 0;
+                this.state.shakeVel = 0;
+            }
         }
 
         // Recoil Kick decay
@@ -493,10 +500,16 @@ export class Game {
             }
         }
 
-        // Zoom decay
-        if (this.state.zoom > 1.0) {
-            this.state.zoom += (1.0 - this.state.zoom) * 0.1;
-            if (this.state.zoom < 1.001) this.state.zoom = 1.0;
+        // Spring-based zoom decay — natural settle with slight overshoot
+        // k=0.12 (softer than shake), damping=0.80 (allows gentle ring-out)
+        if (this.state.zoom !== 1.0 || Math.abs(this.state.zoomVel) > 0.0001) {
+            this.state.zoomVel += (1.0 - this.state.zoom) * 0.12;
+            this.state.zoomVel *= 0.80;
+            this.state.zoom += this.state.zoomVel;
+            if (Math.abs(1.0 - this.state.zoom) < 0.001 && Math.abs(this.state.zoomVel) < 0.0005) {
+                this.state.zoom = 1.0;
+                this.state.zoomVel = 0;
+            }
         }
 
         this.state.growthMultiplier = wasmManager.calculateGrowthMultiplier(this.state.score);

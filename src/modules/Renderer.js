@@ -1157,24 +1157,50 @@ export class Renderer {
         this.ctx.arc(0, 0, 10, 0, Math.PI*2);
         this.ctx.fill();
 
-        // Wings/Pointers
+        // Wings/Pointers with flutter offset
+        const wingPhase = launcher.wingPhase || 0;
+        const wingFlutter = Math.sin(wingPhase) * 2.5;
+
         this.ctx.beginPath();
         this.ctx.moveTo(0, -15);
-        this.ctx.lineTo(8, 5);
+        this.ctx.lineTo(8 + wingFlutter, 5);
         this.ctx.lineTo(0, 0);
-        this.ctx.lineTo(-8, 5);
+        this.ctx.lineTo(-8 - wingFlutter, 5);
         this.ctx.closePath();
         this.ctx.fillStyle = wingColor;
         this.ctx.fill();
 
         this.ctx.beginPath();
         this.ctx.moveTo(0, 15);
-        this.ctx.lineTo(8, -5);
+        this.ctx.lineTo(8 + wingFlutter, -5);
         this.ctx.lineTo(0, 0);
-        this.ctx.lineTo(-8, -5);
+        this.ctx.lineTo(-8 - wingFlutter, -5);
         this.ctx.closePath();
         this.ctx.fillStyle = wingColor;
         this.ctx.fill();
+
+        // Secondary motion: antenna elements that respond to speed/firing
+        const antennaOffset = launcher.antennaOffset || 0;
+        if (antennaOffset > 0.5) {
+            const antennaAlpha = Math.min(1.0, antennaOffset / 6);
+            this.ctx.globalAlpha = antennaAlpha * 0.7;
+            this.ctx.strokeStyle = wingColor;
+            this.ctx.lineWidth = 1.5;
+            this.ctx.shadowBlur = 8;
+
+            // Left antenna
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, -8);
+            this.ctx.lineTo(-10 - antennaOffset, -16 - antennaOffset * 0.8);
+            this.ctx.stroke();
+            // Right antenna
+            this.ctx.beginPath();
+            this.ctx.moveTo(6, -8);
+            this.ctx.lineTo(10 + antennaOffset, -16 - antennaOffset * 0.8);
+            this.ctx.stroke();
+
+            this.ctx.globalAlpha = 1.0;
+        }
 
         this.ctx.shadowBlur = 0;
         this.ctx.restore();
@@ -1184,18 +1210,23 @@ export class Renderer {
         const col = COLORS[s.colorIdx];
         const time = timestamp;
 
-        // Elastic spawn scale
+        // Elastic spawn scale — with slight overshoot for extra juiciness
         let scale = 1.0;
         if (s.spawnTime) {
-            const age = (time - s.spawnTime) / 500; // 0.5s duration
+            const age = (time - s.spawnTime) / 450; // 450ms: snappier than 500ms default
             if (age < 1.0) {
-                // Elastic ease out
-                const c4 = (2 * Math.PI) / 3;
-                scale = age === 0 ? 0 : age === 1 ? 1 : Math.pow(2, -10 * age) * Math.sin((age * 10 - 0.75) * c4) + 1;
+                // Elastic ease out with amplified period (2.8 vs 3.0) for wider overshoot
+                const c4 = (2 * Math.PI) / 2.8;
+                scale = age === 0 ? 0 : age === 1 ? 1 : Math.pow(2, -9 * age) * Math.sin((age * 10 - 0.75) * c4) + 1;
+                scale = Math.max(0, scale);
             }
         }
 
-        const baseRadius = s.radius * scale;
+        // In-flight energy wobble — sinusoidal scale pulse while traveling
+        // 0.35: wobble frequency (≈ 2 cycles per second at 60fps), 0.06: ±6% size pulse
+        const inFlightAge = s.inFlightAge || 0;
+        const wobbleScale = 1.0 + Math.sin(inFlightAge * 0.35 + (s.wobblePhase || 0)) * 0.06;
+        const baseRadius = s.radius * scale * wobbleScale;
 
         this.ctx.save();
         this.ctx.translate(s.x, s.y);
@@ -1221,6 +1252,20 @@ export class Renderer {
         }
         this.ctx.closePath();
         this.ctx.fill();
+
+        // Secondary energy ripple layer — counter-rotating 4-point star at reduced opacity
+        const rippleScale = 1.0 + Math.sin(inFlightAge * 0.25 + (s.wobblePhase || 0) + Math.PI) * 0.12;
+        const rippleSize = baseRadius * 0.55 * rippleScale;
+        this.ctx.globalAlpha = 0.45;
+        this.ctx.beginPath();
+        for (let i = 0; i < spikes * 2; i++) {
+            const r = (i % 2 === 0) ? rippleSize : rippleSize * 0.35;
+            const a = (i * Math.PI) / spikes;
+            this.ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.globalAlpha = 1.0;
 
         // Outer Glow/Halo
         // Rotate opposite for halo
@@ -1472,6 +1517,10 @@ export class Renderer {
 
     drawFloatingText(ft) {
         this.ctx.setTransform(1, 0, 0, 1, ft.x, ft.y);
+        // Apply rotation for high-value combo texts
+        if (ft.rotation) {
+            this.ctx.rotate(ft.rotation);
+        }
         this.ctx.scale(ft.scale, ft.scale);
 
         // Outline
@@ -1495,10 +1544,13 @@ export class Renderer {
     }
 
     drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now(), launcher = null, spores = []) {
-        // JUICE: Apply stress shake to position
-        const shakeX = c.shakeX || 0;
-        const shakeY = c.shakeY || 0;
+        // JUICE: Apply stress shake + micro-jitter to position
+        const shakeX = (c.shakeX || 0) + (c.jitterX || 0);
+        const shakeY = (c.shakeY || 0) + (c.jitterY || 0);
         const xCenter = (c.lane * this.laneWidth) + (this.laneWidth / 2) + shakeX;
+
+        // Use spring-animated displayHeight for rendering (organic "push upward" growth)
+        const renderHeight = (c.displayHeight !== undefined) ? c.displayHeight : c.height;
 
         // Apply elastic scale (Juice!)
         const width = this.laneWidth * 0.8 * (c.scaleX || 1.0);
@@ -1522,7 +1574,7 @@ export class Renderer {
         const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
 
         // Compute lighting context: direction and intensity from nearby bright objects
-        const crystalCenterY = c.type === 'top' ? (c.height * heightScale) / 2 : this.height - (c.height * heightScale) / 2;
+        const crystalCenterY = c.type === 'top' ? (renderHeight * heightScale) / 2 : this.height - (renderHeight * heightScale) / 2;
         let lightDirX = 0;
         let lightDirY = 0;
         let lightIntensity = 0;
@@ -1557,17 +1609,17 @@ export class Renderer {
         const normLightX = lightDirX / lightMag;
         const normLightY = lightDirY / lightMag;
 
-        // JUICE: Critical Danger Glow
+        // JUICE: Critical Danger Glow — faster and more extreme for menacing feel
         if (c.isCritical && !colorOverride) {
-            const pulse = Math.sin(timestamp / 100) * 0.5 + 0.5;
+            const pulse = Math.sin(timestamp / 70) * 0.5 + 0.5;
             if (profile.crystalDetail === 'low') {
                 // Skip shadowBlur on low - use fill color tinting only
                 this.ctx.shadowBlur = 0;
             } else if (profile.crystalDetail === 'medium') {
-                this.ctx.shadowBlur = 10 + (pulse * 15);
+                this.ctx.shadowBlur = 15 + (pulse * 20);
                 this.ctx.shadowColor = 'red';
             } else {
-                this.ctx.shadowBlur = 20 + (pulse * 30);
+                this.ctx.shadowBlur = 25 + (pulse * 40);
                 this.ctx.shadowColor = 'red';
             }
             // Tint fill slightly red
@@ -1605,8 +1657,8 @@ export class Renderer {
         const time = timestamp / 1000;
 
         const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
-            // Apply height scale to the crystal height
-            const h = c.height * hScale * heightScale;
+            // Apply height scale to the crystal height (use animated displayHeight for rendering)
+            const h = renderHeight * hScale * heightScale;
             const w = width * wScale;
             const halfW = w / 2;
             const baseY = ((c.type === 'top') ? 0 : this.height) + shakeY;
@@ -1803,8 +1855,8 @@ export class Renderer {
             }
 
             // Internal cracks for taller crystals (high only, seeded)
-            if (!colorOverride && profile.crystalDetail === 'high' && c.height > 80 && !useSolidFill) {
-                const crackCount = Math.min(4, Math.floor((c.height - 80) / 40) + 1);
+            if (!colorOverride && profile.crystalDetail === 'high' && renderHeight > 80 && !useSolidFill) {
+                const crackCount = Math.min(4, Math.floor((renderHeight - 80) / 40) + 1);
                 const crackSeed = c.crackSeed || seed;
                 this.ctx.strokeStyle = 'rgba(255,255,255,0.08)';
                 this.ctx.lineWidth = 0.5;
@@ -1924,7 +1976,7 @@ export class Renderer {
 
         // Post-geometry: layered soft glow (replaces some shadowBlur dependency)
         if (!colorOverride && profile.crystalDetail !== 'low' && !useSolidFill && c.flash < 0.3) {
-            const glowCenterY = c.type === 'top' ? (c.height * heightScale * 0.4) : (this.height - c.height * heightScale * 0.4);
+            const glowCenterY = c.type === 'top' ? (renderHeight * heightScale * 0.4) : (this.height - renderHeight * heightScale * 0.4);
             const glowRadius = width * 0.6;
             const rgb = this.hexToRgb(col.hex) || {r:255, g:255, b:255};
             const prevOp = this.ctx.globalCompositeOperation;
