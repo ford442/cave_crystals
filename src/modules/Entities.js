@@ -1,6 +1,7 @@
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
 import { wasmManager } from './WasmManager.js';
+import { easeOutBack, springStep } from './easing.js';
 
 export class Crystal {
     constructor(lane, type, height, colorIdx, spawnDelay = 0) {
@@ -31,6 +32,23 @@ export class Crystal {
         this.matchFlash = 0; // Energized sheen after match (fades over time)
         this.crackSeed = Math.random(); // Seeded internal crack pattern
 
+        // Spring-animated display height — grows smoothly toward logical height
+        this.displayHeight = height;
+        this.displayHeightVel = 0;
+
+        // Per-shard phase offsets for organic "living gem" feel
+        this.shardPhaseOffsets = [
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2
+        ];
+
+        // Micro-jitter state for critical feel
+        this.jitterX = 0;
+        this.jitterY = 0;
+
         // Cache shard config index to avoid per-frame lookup in renderer
         this.shardConfigIndex = this._getShardConfigIndex();
     }
@@ -58,27 +76,38 @@ export class Crystal {
                 this.hasSpawned = true;
             } else {
                 this.scaleY = 0.0;
+                this.displayHeight = this.height;
                 return;
             }
         }
+
+        // Spring-animate displayHeight toward logical height for "push upward" feel
+        const dhResult = springStep(this.displayHeight, this.displayHeightVel, this.height, 0.12, 0.82, timeScale);
+        this.displayHeight = dhResult.pos;
+        this.displayHeightVel = dhResult.vel;
 
         // Determine Target Scales for Organic Feel
         let targetScaleX = 1.0;
         let targetScaleY = 1.0;
 
         if (this.isCritical) {
-            // Aggressive Throbbing (Squash and Stretch)
-            // Faster beat (multiplier 0.2 on age)
-            const pulse = Math.sin(this.age * 0.2 + this.lightPhase);
+            // Aggressive Throbbing (Squash and Stretch) — faster and more extreme
+            const pulse = Math.sin(this.age * 0.28 + this.lightPhase);
             // Volume preservation: one expands, other contracts
-            targetScaleX = 1.0 + (pulse * 0.15); // Expand width
-            targetScaleY = 1.0 - (pulse * 0.1); // Contract height
+            targetScaleX = 1.0 + (pulse * 0.22); // Wider swing
+            targetScaleY = 1.0 - (pulse * 0.15);
+
+            // Micro-jitter for menacing feel
+            this.jitterX = (Math.random() - 0.5) * 2.5;
+            this.jitterY = (Math.random() - 0.5) * 2.5;
         } else {
-            // Gentle Breathing
-            // Slower beat (multiplier 0.05 on age)
+            // Gentle Breathing with subtle per-shard character (tracked via lightPhase)
             const breathe = Math.sin(this.age * 0.05 + this.lightPhase);
-            targetScaleX = 1.0 + (breathe * 0.02);
-            targetScaleY = 1.0 + (breathe * 0.02); // Uniform breathing
+            const breathe2 = Math.sin(this.age * 0.031 + this.lightPhase + 1.1); // Second harmonic
+            targetScaleX = 1.0 + (breathe * 0.02) + (breathe2 * 0.005);
+            targetScaleY = 1.0 + (breathe * 0.02) + (breathe2 * 0.005);
+            this.jitterX = 0;
+            this.jitterY = 0;
         }
 
         // Spring physics for scale
@@ -109,6 +138,10 @@ export class Spore {
         this.spawnTime = performance.now(); // For elastic animation
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
 
+        // In-flight wobble state
+        this.wobblePhase = Math.random() * Math.PI * 2;
+        this.inFlightAge = 0;
+
         // Pre-generate lightning arcs so draw loop doesn't call Math.random()
         this.lightningArcs = [];
         const numArcs = 2 + Math.floor(Math.random() * 3);
@@ -128,6 +161,9 @@ export class Spore {
 
     update(topCry, botCry, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
         if (!this.active) return;
+
+        // Track in-flight age for wobble animation
+        this.inFlightAge += timeScale;
 
         // Visual Juice: Emit trail particles
         if (createTrailCallback && Math.random() < 0.7 * timeScale) {
@@ -536,17 +572,30 @@ export class FloatingText {
         this.color = color;
         this.life = 1.0;
         this.vy = -2; // Move upwards
-        this.scale = 0.5;
+        this.scale = 0.1; // Start very small for pop-in
         this.targetScale = targetScale;
+
+        // Pop-in spring state for scale overshoot
+        this.scaleVel = 0;
+
+        // Slight rotation for high-value combos (targetScale > 2.0)
+        this.rotation = 0;
+        this.rotVel = targetScale > 2.0 ? (Math.random() - 0.5) * 0.15 : 0;
     }
 
     update(timeScale = 1.0) {
         this.y += this.vy * timeScale;
         this.life -= 0.02 * timeScale;
 
-        // Pop in effect
-        if (this.scale < this.targetScale) {
-            this.scale += (this.targetScale - this.scale) * 0.2 * timeScale;
+        // Spring-based scale overshoot (easeOutBack feel via spring)
+        const scaleResult = springStep(this.scale, this.scaleVel, this.targetScale, 0.25, 0.75, timeScale);
+        this.scale = scaleResult.pos;
+        this.scaleVel = scaleResult.vel;
+
+        // Decay rotation for high-combo texts
+        if (this.rotVel !== 0) {
+            this.rotation += this.rotVel * timeScale;
+            this.rotVel *= Math.pow(0.88, timeScale);
         }
 
         // Slow down upward movement
@@ -571,6 +620,9 @@ export class Launcher {
         this.scaleY = 1.0;
         this.speed = 0;
 
+        // Spring-based horizontal movement
+        this.velX = 0;
+
         // Constants
         this.lerpFactor = 0.2;
         this.tiltFactor = 0.5;
@@ -579,6 +631,17 @@ export class Launcher {
 
         // Juice
         this.age = 0;
+
+        // Secondary motion: wing flutter
+        this.wingPhase = 0;
+
+        // Secondary motion: antenna spring
+        this.antennaOffset = 0;
+        this.antennaVel = 0;
+
+        // Anticipation flag: brief pre-fire squash
+        this._anticipating = false;
+        this._anticipateTimer = 0;
     }
 
     setTargetLane(lane) {
@@ -586,40 +649,50 @@ export class Launcher {
     }
 
     fire() {
-        this.recoil = 15; // Kick back
-        this.scaleX = 1.3; // Stretch horizontal
-        this.scaleY = 0.7; // Squash vertical
+        // Anticipation squash (compress briefly before recoil kick)
+        this.scaleX = 0.8;
+        this.scaleY = 1.25;
+        this._anticipating = true;
+        this._anticipateTimer = 4; // frames of anticipation before full recoil
     }
 
     update(createTrailCallback, timeScale = 1.0) {
         this.age += timeScale;
 
-        // Lerp position
+        // Spring-based horizontal movement (allows slight overshoot on lane change)
         const targetX = (this.targetLane * this.laneWidth) + (this.laneWidth / 2);
-        const dx = targetX - this.x;
+        const dxToTarget = targetX - this.x;
+        const springK = 0.045;
+        const springDamp = 0.78;
+        this.velX += dxToTarget * springK * timeScale;
+        this.velX *= Math.pow(springDamp, timeScale);
+        this.x += this.velX * timeScale;
+        this.speed = Math.abs(this.velX);
 
-        const f = 1 - Math.pow(1 - this.lerpFactor, timeScale);
-        const moveStep = dx * f;
-        this.x += moveStep;
-        this.speed = Math.abs(moveStep);
+        // Anticipation → recoil sequencing
+        if (this._anticipating) {
+            this._anticipateTimer -= timeScale;
+            if (this._anticipateTimer <= 0) {
+                this._anticipating = false;
+                this.recoil = 15;   // Kick back
+                this.scaleX = 1.3;  // Stretch horizontal
+                this.scaleY = 0.7;  // Squash vertical
+            }
+        }
 
-        // JUICE: Hover Effect (Bobbing)
-        // Apply sine wave to Y relative to base height
-        this.y = (this.rendererHeight / 2) + Math.sin(this.age * 0.05) * 5.0;
+        // JUICE: Organic Hover Effect — primary bob + secondary higher-frequency wobble
+        const primaryBob = Math.sin(this.age * 0.05) * 5.0;
+        const secondaryBob = Math.sin(this.age * 0.13 + 0.7) * 1.5;
+        this.y = (this.rendererHeight / 2) + primaryBob + secondaryBob;
 
         // JUICE: Speed Trail
         if (this.speed > 2.0 && createTrailCallback) {
-             // Spawn trail particles behind the launcher
-             // Add some randomization for a "jet wash" look
              const offset = (Math.random() - 0.5) * 15;
              createTrailCallback(this.x + offset, this.y + 15, 'rgba(0, 255, 255, 0.5)');
         }
 
-        // Calculate tilt based on movement velocity (dx)
-        // Bank into the turn
-        const targetTilt = dx * 0.08; // Increased tilt sensitivity
-
-        // Smoothly interpolate tilt
+        // Calculate tilt based on spring velocity (velX) — bank into the turn
+        const targetTilt = this.velX * 0.08;
         const fTilt = 1 - Math.pow(1 - 0.15, timeScale);
         this.tilt += (targetTilt - this.tilt) * fTilt;
 
@@ -629,9 +702,18 @@ export class Launcher {
             if (this.recoil < 0) this.recoil = 0;
         }
 
-        // Recover squash/stretch
+        // Recover squash/stretch (spring back to rest)
         this.scaleX += (1.0 - this.scaleX) * this.squashRecovery * timeScale;
         this.scaleY += (1.0 - this.scaleY) * this.squashRecovery * timeScale;
+
+        // Wing flutter — phase advances faster with speed
+        this.wingPhase += (0.08 + this.speed * 0.04) * timeScale;
+
+        // Antenna secondary spring — responds to speed with delay/overshoot
+        const antennaTarget = Math.min(this.speed * 2.5, 8.0);
+        const antennaResult = springStep(this.antennaOffset, this.antennaVel, antennaTarget, 0.18, 0.80, timeScale);
+        this.antennaOffset = antennaResult.pos;
+        this.antennaVel = antennaResult.vel;
     }
 }
 
@@ -654,6 +736,10 @@ export class SoulParticle {
         this.size = 8;
         this.trailTimer = 0;
         this.active = true;
+
+        // Perpendicular sway for magical curved paths
+        this.swayPhase = Math.random() * Math.PI * 2;
+        this.swayAmplitude = 2.5 + Math.random() * 2.0;
     }
 
     update(createTrailCallback, timeScale = 1.0) {
@@ -667,6 +753,15 @@ export class SoulParticle {
             const agilityScale = Math.max(timeScale, 0.25);
             this.vx += (desiredVx - this.vx) * this.agility * agilityScale;
             this.vy += (desiredVy - this.vy) * this.agility * agilityScale;
+
+            // Perpendicular sway — adds sinusoidal offset orthogonal to travel direction
+            // Only while far enough from target (fades within 60px)
+            const swayFade = Math.min(1.0, dist / 60);
+            this.swayPhase += 0.1 * timeScale;
+            const swayStrength = Math.sin(this.swayPhase) * this.swayAmplitude * swayFade;
+            // Perpendicular unit vector: (-dy/dist, dx/dist)
+            this.x += (-dy / dist) * swayStrength * timeScale;
+            this.y += (dx / dist) * swayStrength * timeScale;
         }
 
         this.x += this.vx * timeScale;
