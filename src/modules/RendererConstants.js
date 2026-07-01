@@ -2,6 +2,54 @@ import { COLORS, GAME_CONFIG } from './Constants.js';
 
 const FILM_GRAIN_REFRESH_INTERVAL_MS = 90;
 const EMERGENCY_PARTICLE_STRIDE_BOOST = 1;
+const PARTICLE_LOD = {
+    cheapSparkSize: 2.5,
+    cheapPhysicalSize: 4,
+    cheapAuraSize: 1.8,
+    loadStrideStartRatio: 0.65,
+    loadStrideMidRatio: 0.82,
+    frameMsStrideStep: 3.5
+};
+// Frame-time micro-adaptation within a quality profile (~55 FPS budget)
+const ADAPTIVE_FRAME_BUDGET = {
+    targetFrameMs: 18.2,
+    softFrameMs: 16.7,
+    hardFrameMs: 24.0,
+    maxStrideBoost: 3,
+    minEffectScale: 0.6,
+    strideStep: 1,
+    strideRecovery: 0.15,
+    effectScaleStep: 0.06
+};
+
+function resolveParticleStride(profile, particleCount, adaptiveOverrides = null, frameMs = 16.7) {
+    let stride = profile.particleStride;
+    const maxP = profile.maxParticles;
+    if (particleCount > maxP) {
+        stride += EMERGENCY_PARTICLE_STRIDE_BOOST;
+    }
+    if (particleCount > maxP * PARTICLE_LOD.loadStrideMidRatio) {
+        stride += 1;
+    } else if (particleCount > maxP * PARTICLE_LOD.loadStrideStartRatio) {
+        stride += 1;
+    }
+    if (frameMs > ADAPTIVE_FRAME_BUDGET.softFrameMs) {
+        stride += Math.min(2, Math.floor((frameMs - ADAPTIVE_FRAME_BUDGET.softFrameMs) / PARTICLE_LOD.frameMsStrideStep));
+    }
+    if (adaptiveOverrides && adaptiveOverrides.particleStrideBoost > 0) {
+        stride += Math.floor(adaptiveOverrides.particleStrideBoost);
+    }
+    return Math.max(1, stride);
+}
+
+const PRIORITY_PARTICLE_TYPES = new Set(['chunk', 'shard', 'debris']);
+
+function shouldDrawParticleWithStride(index, particle, stride) {
+    if (stride <= 1) return true;
+    if (PRIORITY_PARTICLE_TYPES.has(particle.type)) return true;
+    if (particle.type === 'aura' && particle.size >= PARTICLE_LOD.cheapAuraSize) return true;
+    return (index % stride) === 0;
+}
 // Maximum number of explosion particles sampled for bloom — caps cost during chaos
 const MAX_BLOOM_PARTICLES = 40;
 // Cave environment constants for seeded geometry generation
@@ -35,6 +83,11 @@ export {
     GAME_CONFIG,
     FILM_GRAIN_REFRESH_INTERVAL_MS,
     EMERGENCY_PARTICLE_STRIDE_BOOST,
+    ADAPTIVE_FRAME_BUDGET,
+    PARTICLE_LOD,
+    PRIORITY_PARTICLE_TYPES,
+    resolveParticleStride,
+    shouldDrawParticleWithStride,
     MAX_BLOOM_PARTICLES,
     CAVE_SEED_BASE,
     CAVE_SEED_WIDTH_FACTOR,

@@ -1,4 +1,4 @@
-import { COLORS, GAME_CONFIG } from './RendererConstants.js';
+import { COLORS, GAME_CONFIG, PARTICLE_LOD, shouldDrawParticleWithStride } from './RendererConstants.js';
 
 export function installRendererInterfaceEffects(Renderer) {
     Object.assign(Renderer.prototype, {
@@ -523,91 +523,200 @@ export function installRendererInterfaceEffects(Renderer) {
         }
         ,
         drawParticle(p) {
-            // Fast path for aura particles: soft additive glow circles
+            const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
+            const screenSize = p._screenSize !== undefined ? p._screenSize : (p.size * alpha);
+
             if (p.type === 'aura') {
-                const alpha = (p.life / p.maxLife) * 0.55;
-                this.ctx.globalCompositeOperation = 'lighter';
-                // Outer soft glow
-                this.ctx.globalAlpha = alpha * 0.3;
-                this.ctx.fillStyle = p.color;
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.size * 3.5, 0, Math.PI * 2);
-                this.ctx.fill();
-                // Bright core
-                this.ctx.globalAlpha = alpha;
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.globalCompositeOperation = 'source-over';
-                this.ctx.globalAlpha = 1.0;
+                this._drawAuraParticle(p, alpha);
                 return;
             }
-        
-            // Fast path for ember particles: bright tiny spark with white core
             if (p.type === 'ember') {
-                const alpha = p.life / p.maxLife;
-                this.ctx.globalAlpha = alpha;
-                this.ctx.globalCompositeOperation = 'lighter';
-                this.ctx.fillStyle = p.color;
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.fillStyle = '#ffff88';
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.globalCompositeOperation = 'source-over';
-                this.ctx.globalAlpha = 1.0;
+                this._drawEmberParticle(p, alpha);
                 return;
             }
-        
-            const alpha = p.life / p.maxLife; // Normalize alpha
-            this.ctx.globalAlpha = alpha;
-        
-            // 3D Rotation Simulation
+            if (p.type === 'spark') {
+                this._drawSparkParticle(p, alpha, screenSize);
+                return;
+            }
+            this._drawPhysicalParticle(p, alpha, screenSize);
+        }
+        ,
+        _drawAuraParticle(p, alpha) {
+            const ctx = this.ctx;
+            const glowAlpha = alpha * 0.55;
+            ctx.globalAlpha = glowAlpha * 0.3;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = glowAlpha;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ,
+        _drawEmberParticle(p, alpha) {
+            const ctx = this.ctx;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffff88';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ,
+        _drawSparkParticle(p, alpha, screenSize) {
+            const ctx = this.ctx;
+            if (screenSize < PARTICLE_LOD.cheapSparkSize) {
+                ctx.globalAlpha = alpha * 0.85;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+                return;
+            }
+            ctx.globalAlpha = alpha;
             const scaleX = Math.cos(p.angleX);
             const scaleY = Math.cos(p.angleY);
             const c = Math.cos(p.rotation);
             const s = Math.sin(p.rotation);
-            this.ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
-        
-            this.ctx.fillStyle = p.color;
-        
-            // Glint effect if facing camera
-            if (Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9) {
-                this.ctx.fillStyle = '#fff';
+            ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
+            ctx.fillStyle = Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9 ? '#fff' : p.color;
+            const sz = screenSize;
+            ctx.beginPath();
+            ctx.moveTo(0, -sz);
+            ctx.lineTo(sz * 0.6, 0);
+            ctx.lineTo(0, sz);
+            ctx.lineTo(-sz * 0.6, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        ,
+        _drawPhysicalParticle(p, alpha, screenSize) {
+            const ctx = this.ctx;
+            if (screenSize < PARTICLE_LOD.cheapPhysicalSize) {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(1, screenSize * 0.5), 0, Math.PI * 2);
+                ctx.fill();
+                return;
             }
-        
+            ctx.globalAlpha = alpha;
+            const scaleX = Math.cos(p.angleX);
+            const scaleY = Math.cos(p.angleY);
+            const c = Math.cos(p.rotation);
+            const s = Math.sin(p.rotation);
+            ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
+            ctx.fillStyle = Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9 ? '#fff' : p.color;
+
             if ((p.type === 'debris' || p.type === 'shard' || p.type === 'chunk') && p.polyPoints) {
-                this.ctx.beginPath();
+                ctx.beginPath();
                 const shrink = alpha;
-        
                 if (p.polyPoints.length > 0) {
-                    this.ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
-                    for(let i=1; i<p.polyPoints.length; i++) {
-                        this.ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                    ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                    for (let i = 1; i < p.polyPoints.length; i++) {
+                        ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
                     }
                 }
-                this.ctx.closePath();
-        
-                this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                this.ctx.lineWidth = p.type === 'chunk' ? 2 : 1;
-                this.ctx.stroke();
-                this.ctx.fill();
-        
+                ctx.closePath();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = p.type === 'chunk' ? 2 : 1;
+                ctx.stroke();
+                ctx.fill();
             } else {
-                this.ctx.beginPath();
-                const sz = p.size * alpha;
-                this.ctx.moveTo(0, -sz);
-                this.ctx.lineTo(sz * 0.6, 0);
-                this.ctx.lineTo(0, sz);
-                this.ctx.lineTo(-sz * 0.6, 0);
-                this.ctx.closePath();
-                this.ctx.fill();
+                ctx.beginPath();
+                const sz = screenSize;
+                ctx.moveTo(0, -sz);
+                ctx.lineTo(sz * 0.6, 0);
+                ctx.lineTo(0, sz);
+                ctx.lineTo(-sz * 0.6, 0);
+                ctx.closePath();
+                ctx.fill();
             }
-        
-            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-            this.ctx.globalAlpha = 1.0;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        ,
+        drawParticlesBatched(particles, particleLimit, stride, gameState) {
+            const ctx = this.ctx;
+            const trackMs = gameState && gameState.devPerfOverlay;
+            const t0 = trackMs ? performance.now() : 0;
+
+            // Pass 1: trails — single lighter composite for the whole group
+            ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < particleLimit; i++) {
+                const p = particles[i];
+                if (!p.isTrail) continue;
+                if (!shouldDrawParticleWithStride(i, p, stride)) continue;
+                if (p._onScreen === false) continue;
+                const s = p.size;
+                if (p._onScreen === undefined && (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height)) continue;
+                ctx.globalAlpha = p._drawAlpha !== undefined ? p._drawAlpha : p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Pass 2: aura glows
+            for (let i = 0; i < particleLimit; i++) {
+                const p = particles[i];
+                if (p.isTrail || p.type !== 'aura') continue;
+                if (!shouldDrawParticleWithStride(i, p, stride)) continue;
+                if (p._onScreen === false) continue;
+                const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
+                if (p.size < PARTICLE_LOD.cheapAuraSize && stride > 1 && (i % stride) !== 0) continue;
+                this._drawAuraParticle(p, alpha);
+            }
+
+            // Pass 3: embers
+            for (let i = 0; i < particleLimit; i++) {
+                const p = particles[i];
+                if (p.isTrail || p.type !== 'ember') continue;
+                if (!shouldDrawParticleWithStride(i, p, stride)) continue;
+                if (p._onScreen === false) continue;
+                const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
+                this._drawEmberParticle(p, alpha);
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1.0;
+
+            // Pass 4: physical debris/shards/chunks — always prioritized by stride helper
+            for (let i = 0; i < particleLimit; i++) {
+                const p = particles[i];
+                if (p.isTrail || p.type === 'aura' || p.type === 'ember' || p.type === 'spark') continue;
+                if (!shouldDrawParticleWithStride(i, p, stride)) continue;
+                if (p._onScreen === false) continue;
+                const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
+                const screenSize = p._screenSize !== undefined ? p._screenSize : (p.size * alpha);
+                if (p._onScreen === undefined) {
+                    if (p.x + screenSize < 0 || p.x - screenSize > this.width || p.y + screenSize < 0 || p.y - screenSize > this.height) continue;
+                }
+                this._drawPhysicalParticle(p, alpha, screenSize);
+            }
+
+            // Pass 5: sparks
+            for (let i = 0; i < particleLimit; i++) {
+                const p = particles[i];
+                if (p.isTrail || p.type !== 'spark') continue;
+                if (!shouldDrawParticleWithStride(i, p, stride)) continue;
+                if (p._onScreen === false) continue;
+                const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
+                const screenSize = p._screenSize !== undefined ? p._screenSize : (p.size * alpha);
+                if (p._onScreen === undefined) {
+                    if (p.x + screenSize < 0 || p.x - screenSize > this.width || p.y + screenSize < 0 || p.y - screenSize > this.height) continue;
+                }
+                this._drawSparkParticle(p, alpha, screenSize);
+            }
+
+            ctx.globalAlpha = 1.0;
+            ctx.globalCompositeOperation = 'source-over';
+
+            if (trackMs && gameState.perfMetrics) {
+                gameState.perfMetrics.particleDrawMs = performance.now() - t0;
+            }
         }
         ,
         drawTrailParticle(p) {
@@ -676,6 +785,46 @@ export function installRendererInterfaceEffects(Renderer) {
             this.ctx.setTransform(1, 0, 0, 1, 0, 0);
             this.ctx.globalAlpha = 1.0;
         }
-        
+        ,
+        drawDevMetricsOverlay(gameState, profile) {
+            const m = gameState.perfMetrics;
+            const overrides = gameState.adaptiveOverrides;
+            const lines = [
+                'DEV PERF',
+                `FPS ${Math.round(m.smoothedFps || m.fps || 0)} (${m.fps || 0} raw)`,
+                `Frame ${(m.smoothedFrameMs || 0).toFixed(1)}ms`,
+                `Particles ${m.particleCount}/${m.particleLimit} stride ${m.particleStride}`,
+                `Env ${m.envParticleCount}/${profile.maxEnvParticles || 0}`,
+                `Shockwaves ${m.shockwaveCount}`,
+                `Quality ${gameState.renderQuality.toUpperCase()} · ${gameState.qualityMode.toUpperCase()}`,
+                `timeScale ${(gameState.timeScale || 1).toFixed(2)}`,
+                `critical ${(gameState.criticalIntensity || 0).toFixed(2)}`,
+                `adapt stride+${(overrides.particleStrideBoost || 0).toFixed(1)} fx ${(overrides.effectScale || 1).toFixed(2)}`,
+                `draw ${(m.particleDrawMs || 0).toFixed(2)}ms`
+            ];
+
+            const pad = 8;
+            const lineHeight = 13;
+            const boxW = 248;
+            const boxH = pad * 2 + lines.length * lineHeight;
+
+            this.ctx.save();
+            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+            this.ctx.fillRect(10, 10, boxW, boxH);
+            this.ctx.strokeStyle = 'rgba(0, 255, 136, 0.55)';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(10.5, 10.5, boxW - 1, boxH - 1);
+
+            this.ctx.font = '11px monospace';
+            this.ctx.textAlign = 'left';
+            this.ctx.textBaseline = 'top';
+            for (let i = 0; i < lines.length; i++) {
+                this.ctx.fillStyle = i === 0 ? 'rgba(0, 255, 136, 0.95)' : 'rgba(200, 255, 220, 0.9)';
+                this.ctx.fillText(lines[i], 18, 14 + i * lineHeight);
+            }
+            this.ctx.restore();
+        }
+
     });
 }

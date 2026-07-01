@@ -2,6 +2,7 @@ import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
 import { EnergyRing, SoulParticle } from './Entities.js';
 import { wasmManager } from './WasmManager.js';
+import { ADAPTIVE_FRAME_BUDGET, resolveParticleStride } from './RendererConstants.js';
 
 const ADAPTIVE_QUALITY = {
     autoLowFps: 50,
@@ -190,40 +191,68 @@ export function installGameRuntime(Game) {
         }
         ,
         updateSharedVisuals(dt, timeScale = 1.0) {
-            // Update Particles
-            for (let i = this.state.particles.length - 1; i >= 0; i--) {
-                let p = this.state.particles[i];
-        
-                // Pass width and callback for wall bouncing juice
-                p.update(
-                    this.renderer.width,
-                    this.renderer.height,
-                    this._boundCreateImpactDust,
-                    timeScale
-                );
-        
+            const particles = this.state.particles;
+            const rw = this.renderer.width;
+            const rh = this.renderer.height;
+            const onBounce = this._boundCreateImpactDust;
+            const ambientBatch = this._ambientBatch;
+            let ambientCount = 0;
+
+            const removeParticleAt = (i) => {
+                const p = particles[i];
+                if (p.isTrail) {
+                    this.trailPool.release(p);
+                } else {
+                    this.particlePool.release(p);
+                }
+                particles[i] = particles[particles.length - 1];
+                particles.pop();
+            };
+
+            // Update Particles — ambient types batched separately for WASM/JS fast path
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+
+                if (p.type === 'aura' || p.type === 'ember') {
+                    if (ambientCount < ambientBatch.length) ambientBatch[ambientCount++] = p;
+                    continue;
+                }
+
+                if (p.isTrail) {
+                    p.update(timeScale, rw, rh);
+                } else {
+                    p.update(rw, rh, onBounce, timeScale);
+                }
+
                 // JUICE: Chunk Shatter Logic
                 if (p.type === 'chunk' && (p.hitFloor || p.hitWall)) {
-                    // Shatter into smaller shards
-                    // If wall hit, shatter inward
-                    let angle = -Math.PI / 2; // Up (floor hit)
+                    let angle = -Math.PI / 2;
                     if (p.hitWall) {
-                        angle = p.x < 100 ? 0 : Math.PI; // Inward
+                        angle = p.x < 100 ? 0 : Math.PI;
                     }
-        
                     this.createParticles(p.x, p.y, p.color, 15, angle, 2.0, 'shard');
-                    p.life = 0; // Destroy chunk
+                    p.life = 0;
                 }
-        
+
                 if (p.life <= 0) {
-                    // Release back to pool to reduce GC pressure
-                    if (p.isTrail) {
-                        this.trailPool.release(p);
-                    } else {
-                        this.particlePool.release(p);
+                    removeParticleAt(i);
+                }
+            }
+
+            if (ambientCount > 0) {
+                const usedWasm = wasmManager.batchIntegrateAmbientParticles(
+                    ambientBatch, ambientCount, timeScale, rw, rh
+                );
+                if (!usedWasm) {
+                    for (let j = 0; j < ambientCount; j++) {
+                        ambientBatch[j].updateAmbient(rw, rh, timeScale);
                     }
-                    this.state.particles[i] = this.state.particles[this.state.particles.length - 1];
-                    this.state.particles.pop();
+                }
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    if ((p.type === 'aura' || p.type === 'ember') && p.life <= 0) {
+                        removeParticleAt(i);
+                    }
                 }
             }
         
@@ -501,6 +530,7 @@ export function installGameRuntime(Game) {
         }
         ,
         setQualityMode(mode = 'auto') {
+            const prevQuality = this.state.renderQuality;
             this.state.qualityMode = mode;
             if (mode === 'auto') {
                 if (!this._smoothedFps) this._smoothedFps = 60;
@@ -509,20 +539,28 @@ export function installGameRuntime(Game) {
                     ADAPTIVE_QUALITY.autoLowFps,
                     ADAPTIVE_QUALITY.autoMediumFps
                 );
-                return;
+            } else {
+                this.state.renderQuality = mode;
             }
-            this.state.renderQuality = mode;
+            if (prevQuality !== this.state.renderQuality) {
+                this.resetAdaptiveOverrides();
+            }
+        }
+        ,
+        resetAdaptiveOverrides() {
+            this.state.adaptiveOverrides.particleStrideBoost = 0;
+            this.state.adaptiveOverrides.effectScale = 1.0;
         }
         ,
         updateAdaptiveQuality(fps) {
             if (!this._smoothedFps) this._smoothedFps = fps;
             this._smoothedFps += (fps - this._smoothedFps) * ADAPTIVE_QUALITY.fpsSmoothingFactor;
             if (this.state.qualityMode !== 'auto') return;
-        
+
             if (!this._qualityCooldownUntil) this._qualityCooldownUntil = 0;
             const now = performance.now();
             if (now < this._qualityCooldownUntil) return;
-        
+
             if (this._smoothedFps < ADAPTIVE_QUALITY.downgradeLowFps && this.state.renderQuality !== 'low') {
                 this.state.renderQuality = 'low';
                 this._qualityCooldownUntil = now + ADAPTIVE_QUALITY.cooldownSlowMs;
@@ -535,6 +573,60 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        updatePerfMetrics(dt, fps) {
+            const metrics = this.state.perfMetrics;
+            metrics.frameMs = dt;
+            if (!metrics.smoothedFrameMs) metrics.smoothedFrameMs = dt;
+            metrics.smoothedFrameMs += (dt - metrics.smoothedFrameMs) * 0.18;
+            if (fps !== undefined) {
+                metrics.fps = fps;
+                metrics.smoothedFps = this._smoothedFps || fps;
+            }
+            metrics.particleCount = this.state.particles.length;
+            const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+            metrics.particleLimit = profile.maxParticles;
+            metrics.envParticleCount = this.state.envParticles.length;
+            metrics.shockwaveCount = this.state.shockwaves.length;
+            metrics.particleStride = resolveParticleStride(
+                profile,
+                metrics.particleCount,
+                this.state.adaptiveOverrides,
+                metrics.smoothedFrameMs
+            );
+        }
+        ,
+        updateFrameTimeAdaptive() {
+            const budget = ADAPTIVE_FRAME_BUDGET;
+            const overrides = this.state.adaptiveOverrides;
+            const frameMs = this.state.perfMetrics.smoothedFrameMs;
+
+            if (frameMs > budget.hardFrameMs) {
+                overrides.particleStrideBoost = Math.min(
+                    budget.maxStrideBoost,
+                    overrides.particleStrideBoost + budget.strideStep
+                );
+                overrides.effectScale = Math.max(
+                    budget.minEffectScale,
+                    overrides.effectScale - budget.effectScaleStep
+                );
+            } else if (frameMs > budget.targetFrameMs) {
+                overrides.particleStrideBoost = Math.min(
+                    budget.maxStrideBoost,
+                    overrides.particleStrideBoost + budget.strideStep * 0.5
+                );
+                overrides.effectScale = Math.max(
+                    budget.minEffectScale,
+                    overrides.effectScale - budget.effectScaleStep * 0.5
+                );
+            } else if (frameMs < budget.softFrameMs) {
+                overrides.particleStrideBoost = Math.max(
+                    0,
+                    overrides.particleStrideBoost - budget.strideRecovery
+                );
+                overrides.effectScale = Math.min(1.0, overrides.effectScale + budget.effectScaleStep * 0.5);
+            }
+        }
+        ,
         loop(timestamp) {
             if (!this.state.lastTime) this.state.lastTime = timestamp;
             let dt = timestamp - this.state.lastTime;
@@ -542,7 +634,10 @@ export function installGameRuntime(Game) {
         
             // Cap dt to prevent huge jumps if tab was inactive
             if (dt > 100) dt = 100;
-        
+
+            this.updatePerfMetrics(dt);
+            this.updateFrameTimeAdaptive();
+
             // FPS Counter
             if (!this._fpsLastTime) this._fpsLastTime = timestamp;
             if (!this._fpsFrames) this._fpsFrames = 0;
@@ -550,6 +645,7 @@ export function installGameRuntime(Game) {
             if (timestamp - this._fpsLastTime >= 1000) {
                 const fps = Math.round((this._fpsFrames * 1000) / (timestamp - this._fpsLastTime));
                 this.updateAdaptiveQuality(fps);
+                this.updatePerfMetrics(dt, fps);
                 if (this.ui.fps) {
                     const qualityLabel = this.state.renderQuality.toUpperCase() + (this.state.qualityMode === 'auto' ? ' AUTO' : '');
                     this.ui.fps.textContent = `${fps} FPS · ${qualityLabel}`;

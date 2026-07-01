@@ -354,7 +354,8 @@ export function installRendererPostEffects(Renderer) {
             const sx = bw / this.width;
             const sy = bh / this.height;
             const bctx = this._bloomCtx;
-            const strength = profile.bloomStrength || 0.85;
+            const effectScale = gameState.adaptiveOverrides?.effectScale ?? 1.0;
+            const strength = (profile.bloomStrength || 0.85) * effectScale;
         
             // Clear bloom buffer each frame
             bctx.clearRect(0, 0, bw, bh);
@@ -527,7 +528,8 @@ export function installRendererPostEffects(Renderer) {
         }
         ,
         drawFilmPass(gameState, timestamp, profile) {
-            const grainAmount = profile.grainAmount || 0;
+            const effectScale = gameState.adaptiveOverrides?.effectScale ?? 1.0;
+            const grainAmount = (profile.grainAmount || 0) * effectScale;
         
             // 1. Permanent base vignette for cinematic framing
             this._drawBaseVignette();

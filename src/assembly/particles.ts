@@ -59,6 +59,57 @@ export function batchUpdateParticles(
     return count;
 }
 
+const SIMPLE_BATCH_MAX: i32 = 384;
+const SIMPLE_BATCH_STRIDE: i32 = 7;
+// Layout per particle: x, y, vx, vy, life, gravity, friction
+const _simpleBatch = new Float64Array(SIMPLE_BATCH_MAX * SIMPLE_BATCH_STRIDE);
+
+export function getSimpleBatchByteOffset(): i32 {
+    return _simpleBatch.byteOffset;
+}
+
+export function getSimpleBatchFloatCount(): i32 {
+    return SIMPLE_BATCH_MAX * SIMPLE_BATCH_STRIDE;
+}
+
+export function getSimpleBatchStride(): i32 {
+    return SIMPLE_BATCH_STRIDE;
+}
+
+/**
+ * Integrate ambient particles (aura/ember) in a single WASM pass.
+ * Data is read/written in the exported Float64Array buffer.
+ */
+export function batchIntegrateSimpleParticles(count: i32, timeScale: f64, lifeDecay: f64): void {
+    const stride = SIMPLE_BATCH_STRIDE;
+    const cap = count > SIMPLE_BATCH_MAX ? SIMPLE_BATCH_MAX : count;
+    for (let i: i32 = 0; i < cap; i++) {
+        const base = i * stride;
+        let x = _simpleBatch[base];
+        let y = _simpleBatch[base + 1];
+        let vx = _simpleBatch[base + 2];
+        let vy = _simpleBatch[base + 3];
+        let life = _simpleBatch[base + 4];
+        const gravity = _simpleBatch[base + 5];
+        const friction = _simpleBatch[base + 6];
+
+        x += vx * timeScale;
+        y += vy * timeScale;
+        vy += gravity * timeScale;
+        const adjFriction = 1.0 - (1.0 - friction) * timeScale;
+        vx *= adjFriction;
+        vy *= adjFriction;
+        const lifeDecayScale = timeScale < 0.25 ? 0.25 : timeScale;
+        life -= lifeDecay * lifeDecayScale;
+
+        _simpleBatch[base] = x;
+        _simpleBatch[base + 1] = y;
+        _simpleBatch[base + 2] = vx;
+        _simpleBatch[base + 3] = vy;
+        _simpleBatch[base + 4] = life;
+    }
+}
+
 /**
  * Calculate X velocity for a shatter burst particle
  * Distributes particles in a circle

@@ -302,6 +302,61 @@ export class WasmManager {
         const angle = (index / total) * Math.PI * 2;
         return Math.sin(angle) * force - Math.cos(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
     }
+
+    /**
+     * Batch-integrate ambient particles (aura/ember) via WASM linear memory.
+     * Returns false when WASM is unavailable or batch is too small — caller runs JS fallback.
+     */
+    batchIntegrateAmbientParticles(ambientParticles, count, timeScale, rendererWidth, rendererHeight) {
+        const MIN_BATCH = 48;
+        if (!this.ready || !this.exports.batchIntegrateSimpleParticles || count < MIN_BATCH) {
+            return false;
+        }
+
+        try {
+            const memory = this.instance.exports.memory;
+            const byteOffset = this.exports.getSimpleBatchByteOffset();
+            const stride = this.exports.getSimpleBatchStride();
+            const maxBatch = Math.floor(this.exports.getSimpleBatchFloatCount() / stride);
+            const batchCount = Math.min(count, maxBatch);
+            const view = new Float64Array(memory.buffer, byteOffset, stride * batchCount);
+
+            for (let j = 0; j < batchCount; j++) {
+                const p = ambientParticles[j];
+                const base = j * stride;
+                view[base] = p.x;
+                view[base + 1] = p.y;
+                view[base + 2] = p.vx;
+                view[base + 3] = p.vy;
+                view[base + 4] = p.life;
+                view[base + 5] = p.gravity;
+                view[base + 6] = p.friction;
+            }
+
+            this.exports.batchIntegrateSimpleParticles(batchCount, timeScale, 0.015);
+
+            for (let j = 0; j < batchCount; j++) {
+                const p = ambientParticles[j];
+                const base = j * stride;
+                p.x = view[base];
+                p.y = view[base + 1];
+                p.vx = view[base + 2];
+                p.vy = view[base + 3];
+                p.life = view[base + 4];
+                p._cacheDrawState(rendererWidth, rendererHeight);
+            }
+
+            if (batchCount < count) {
+                for (let j = batchCount; j < count; j++) {
+                    ambientParticles[j].updateAmbient(rendererWidth, rendererHeight, timeScale);
+                }
+            }
+            return true;
+        } catch (error) {
+            console.warn('WASM ambient particle batch failed, falling back:', error);
+            return false;
+        }
+    }
 }
 
 // Create and export a singleton instance

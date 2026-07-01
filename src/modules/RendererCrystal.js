@@ -67,10 +67,21 @@ export function installRendererCrystal(Renderer) {
             const lightMag = Math.sqrt(lightDirX * lightDirX + lightDirY * lightDirY) || 1;
             const normLightX = lightDirX / lightMag;
             const normLightY = lightDirY / lightMag;
+
+            const time = timestamp / 1000;
+            const isHighDetail = profile.crystalDetail === 'high' && !useSolidFill;
+            // JUICE: Shared breathing phases — computed once per crystal, reused across shards
+            const breathePhase = Math.sin(time * 1.2 + c.lightPhase);
+            const ageBreathe = Math.sin(c.age * 0.05 + c.lightPhase * 0.7);
+            const critPulse = c.isCritical ? (Math.sin(timestamp / 70) * 0.5 + 0.5) : 0;
+            const baseRgb = this.hexToRgb(col.hex);
+            const baseR = baseRgb ? baseRgb.r : 255;
+            const baseG = baseRgb ? baseRgb.g : 255;
+            const baseB = baseRgb ? baseRgb.b : 255;
         
             // JUICE: Critical Danger Glow — faster and more extreme for menacing feel
             if (c.isCritical && !colorOverride) {
-                const pulse = Math.sin(timestamp / 70) * 0.5 + 0.5;
+                const pulse = critPulse;
                 if (profile.crystalDetail === 'low') {
                     // Skip shadowBlur on low - use fill color tinting only
                     this.ctx.shadowBlur = 0;
@@ -78,7 +89,8 @@ export function installRendererCrystal(Renderer) {
                     this.ctx.shadowBlur = 15 + (pulse * 20);
                     this.ctx.shadowColor = 'red';
                 } else {
-                    this.ctx.shadowBlur = 25 + (pulse * 40);
+                    // High: lean on internal glow veins over heavy shadowBlur
+                    this.ctx.shadowBlur = 10 + (pulse * 16);
                     this.ctx.shadowColor = 'red';
                 }
                 // Tint fill slightly red
@@ -113,12 +125,18 @@ export function installRendererCrystal(Renderer) {
             this.ctx.lineWidth = baseLineWidth;
             this.ctx.lineJoin = 'miter';
         
-            const time = timestamp / 1000;
-        
-            const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard') => {
+            const drawShard = (offsetX, hScale, wScale, tilt, facetStyle = 'standard', shardIndex = 0) => {
+                const phaseOff = c.shardPhaseOffsets ? c.shardPhaseOffsets[shardIndex % 5] : 0;
+                // JUICE: Per-shard critical throb — staggered via seeded phase offsets
+                let critThrob = 0;
+                if (c.isCritical && isHighDetail) {
+                    critThrob = Math.sin(timestamp / 88 + phaseOff) * 0.045 * (0.6 + critPulse * 0.4);
+                }
+                const shardBreathe = isHighDetail ? (1 + breathePhase * 0.012 + ageBreathe * 0.006) : 1;
+
                 // Apply height scale to the crystal height (use animated displayHeight for rendering)
-                const h = renderHeight * hScale * heightScale;
-                const w = width * wScale;
+                const h = renderHeight * hScale * heightScale * shardBreathe * (1 + critThrob);
+                const w = width * wScale * (1 - critThrob * 0.35);
                 const halfW = w / 2;
                 const baseY = ((c.type === 'top') ? 0 : this.height) + shakeY;
                 const tipY = ((c.type === 'top') ? h : this.height - h) + shakeY;
@@ -130,6 +148,7 @@ export function installRendererCrystal(Renderer) {
                 // Dot product with light direction for specular
                 const specularDot = Math.max(0, facetNormX * normLightX + facetNormY * normLightY * 0.5);
                 const specularStrength = specularDot * lightIntensity;
+                const critSpecBoost = c.isCritical && isHighDetail ? critPulse * 0.35 : 0;
         
                 if (!colorOverride) {
                     if (useSolidFill) {
@@ -144,14 +163,18 @@ export function installRendererCrystal(Renderer) {
                              grad.addColorStop(1, '#fff');
                         } else {
                              // Light-responsive gradient: brighter on lit side
-                             const litBoost = Math.floor(specularStrength * 40);
-                             const baseR = parseInt(col.hex.slice(1,3), 16);
-                             const baseG = parseInt(col.hex.slice(3,5), 16);
-                             const baseB = parseInt(col.hex.slice(5,7), 16);
+                             const litBoost = Math.floor((specularStrength + critSpecBoost) * 48);
                              const litColor = `rgb(${Math.min(255, baseR + litBoost)}, ${Math.min(255, baseG + litBoost)}, ${Math.min(255, baseB + litBoost)})`;
+                             const darkStop = isHighDetail
+                                 ? this.darkenColor(col.hex, 0.28 + breathePhase * 0.04)
+                                 : this.darkenColor(col.hex, 0.3);
                              grad.addColorStop(0, litColor);
-                             grad.addColorStop(0.4, col.hex);
-                             grad.addColorStop(0.7, this.darkenColor(col.hex, 0.3));
+                             grad.addColorStop(0.35, col.hex);
+                             grad.addColorStop(0.65, darkStop);
+                             if (c.isCritical && isHighDetail) {
+                                 const heat = Math.floor(40 + critPulse * 60);
+                                 grad.addColorStop(0.85, `rgba(255, ${heat}, ${Math.floor(heat * 0.25)}, 0.35)`);
+                             }
                              grad.addColorStop(1, 'rgba(0,0,0,0.25)');
                         }
                         this.ctx.fillStyle = grad;
@@ -222,70 +245,99 @@ export function installRendererCrystal(Renderer) {
                 // Enhanced internal facets with multiple layers
                 if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low') {
                     // Primary highlight facet - modulated by light direction
-                    const highlightAlpha = 0.2 + specularStrength * 0.25;
+                    const highlightAlpha = 0.2 + specularStrength * 0.25 + critSpecBoost * 0.15;
                     this.ctx.fillStyle = `rgba(255,255,255,${highlightAlpha.toFixed(2)})`;
                     this.ctx.beginPath();
                     this.ctx.moveTo(cx - halfW*0.6, baseY);
                     if (c.type === 'top') {
-                        this.ctx.lineTo(cx + tilt*0.3, tipY * 0.6);
+                        this.ctx.lineTo(cx + tilt*0.3, baseY + (tipY - baseY) * 0.6);
                     } else {
-                        this.ctx.lineTo(cx + tilt*0.3, this.height - ((this.height-tipY)*0.6));
+                        this.ctx.lineTo(cx + tilt*0.3, baseY - (baseY - tipY) * 0.6);
                     }
                     this.ctx.lineTo(cx + halfW*0.2, baseY);
                     this.ctx.fill();
         
                     // Secondary highlight for crystalline effect
-                    this.ctx.fillStyle = `rgba(255,255,255,${(0.1 + specularStrength * 0.15).toFixed(2)})`;
+                    this.ctx.fillStyle = `rgba(255,255,255,${(0.1 + specularStrength * 0.15 + critSpecBoost * 0.1).toFixed(2)})`;
                     this.ctx.beginPath();
                     this.ctx.moveTo(cx + halfW*0.2, baseY);
                     if (c.type === 'top') {
-                        this.ctx.lineTo(cx + tilt*0.7, tipY * 0.75);
+                        this.ctx.lineTo(cx + tilt*0.7, baseY + (tipY - baseY) * 0.75);
                     } else {
-                        this.ctx.lineTo(cx + tilt*0.7, this.height - ((this.height-tipY)*0.75));
+                        this.ctx.lineTo(cx + tilt*0.7, baseY - (baseY - tipY) * 0.75);
                     }
                     this.ctx.lineTo(cx + halfW*0.6, baseY);
                     this.ctx.fill();
+
+                    // JUICE: Tertiary breathing facet — high detail, organic lightPhase variation
+                    if (isHighDetail) {
+                        const tertiaryAlpha = (0.06 + breathePhase * 0.04 + specularStrength * 0.12).toFixed(2);
+                        this.ctx.fillStyle = `rgba(220,255,255,${tertiaryAlpha})`;
+                        this.ctx.beginPath();
+                        const tMid = c.type === 'top'
+                            ? baseY + (tipY - baseY) * (0.35 + ageBreathe * 0.05)
+                            : baseY - (baseY - tipY) * (0.35 + ageBreathe * 0.05);
+                        this.ctx.moveTo(cx - halfW * 0.15, baseY);
+                        this.ctx.lineTo(cx + tilt * 0.45 + breathePhase * halfW * 0.04, tMid);
+                        this.ctx.lineTo(cx + halfW * 0.35, baseY);
+                        this.ctx.fill();
+                    }
         
                     // Internal crystalline structure lines
-                    this.ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+                    this.ctx.strokeStyle = `rgba(255,255,255,${(0.15 + specularStrength * 0.1).toFixed(2)})`;
                     this.ctx.lineWidth = 1;
                     this.ctx.beginPath();
-                    const midY = c.type === 'top' ? tipY * 0.5 : this.height - ((this.height-tipY)*0.5);
+                    const midY = c.type === 'top' ? baseY + (tipY - baseY) * 0.5 : baseY - (baseY - tipY) * 0.5;
                     this.ctx.moveTo(cx - halfW*0.3, baseY);
                     this.ctx.lineTo(cx + tilt*0.5, midY);
                     this.ctx.lineTo(cx + halfW*0.3, baseY);
                     this.ctx.stroke();
+
+                    // JUICE: Extra facet lattice lines on high detail — density modulated by age
+                    if (isHighDetail) {
+                        const latticeAlpha = (0.06 + Math.abs(ageBreathe) * 0.05).toFixed(2);
+                        this.ctx.strokeStyle = `rgba(200,240,255,${latticeAlpha})`;
+                        const latticeY1 = c.type === 'top'
+                            ? baseY + (tipY - baseY) * (0.25 + breathePhase * 0.03)
+                            : baseY - (baseY - tipY) * (0.25 + breathePhase * 0.03);
+                        const latticeY2 = c.type === 'top'
+                            ? baseY + (tipY - baseY) * 0.65
+                            : baseY - (baseY - tipY) * 0.65;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(cx - halfW * 0.45, latticeY1);
+                        this.ctx.lineTo(cx + tilt * 0.2, latticeY2);
+                        this.ctx.lineTo(cx + halfW * 0.45, latticeY1);
+                        this.ctx.stroke();
+                    }
                     this.ctx.lineWidth = baseLineWidth;
                 }
         
                 // Rim lighting (medium+high) — edge glow from nearby light sources
                 if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low' && lightIntensity > 0.1) {
                     const rimSide = normLightX > 0 ? -1 : 1; // Rim appears opposite to light
-                    const rimAlpha = (lightIntensity * 0.35).toFixed(2);
-                    this.ctx.strokeStyle = `rgba(255,255,255,${rimAlpha})`;
-                    this.ctx.lineWidth = 1.5;
+                    const rimAlpha = (lightIntensity * 0.35 + critSpecBoost * 0.2).toFixed(2);
+                    this.ctx.strokeStyle = c.isCritical && isHighDetail
+                        ? `rgba(255,${Math.floor(120 + critPulse * 80)},${Math.floor(60 + critPulse * 40)},${rimAlpha})`
+                        : `rgba(255,255,255,${rimAlpha})`;
+                    this.ctx.lineWidth = isHighDetail ? 1.8 : 1.5;
                     this.ctx.beginPath();
-                    if (c.type === 'top') {
-                        this.ctx.moveTo(cx + rimSide * halfW, baseY);
-                        this.ctx.lineTo(cx + tilt + rimSide * halfW * 0.1, tipY);
-                    } else {
-                        this.ctx.moveTo(cx + rimSide * halfW, baseY);
-                        this.ctx.lineTo(cx + tilt + rimSide * halfW * 0.1, tipY);
-                    }
+                    this.ctx.moveTo(cx + rimSide * halfW, baseY);
+                    this.ctx.lineTo(cx + tilt + rimSide * halfW * 0.1, tipY);
                     this.ctx.stroke();
                     this.ctx.lineWidth = baseLineWidth;
                 }
         
                 // Dynamic specular catch-light (high only)
-                if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill && lightIntensity > 0.15) {
+                if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill && (lightIntensity > 0.12 || critSpecBoost > 0.1)) {
                     const catchLightY = c.type === 'top'
-                        ? baseY + (tipY - baseY) * (0.3 + normLightY * 0.2)
-                        : baseY - (baseY - tipY) * (0.3 - normLightY * 0.2);
+                        ? baseY + (tipY - baseY) * (0.3 + normLightY * 0.2 + breathePhase * 0.02)
+                        : baseY - (baseY - tipY) * (0.3 - normLightY * 0.2 - breathePhase * 0.02);
                     const catchLightX = cx + normLightX * halfW * 0.3;
-                    const catchSize = halfW * 0.15 * (1 + specularStrength);
-                    const catchAlpha = (specularStrength * 0.6).toFixed(2);
+                    const catchSize = halfW * 0.15 * (1 + specularStrength + critSpecBoost);
+                    const catchAlpha = (specularStrength * 0.6 + critSpecBoost * 0.5).toFixed(2);
                     const catchGrad = this.ctx.createRadialGradient(catchLightX, catchLightY, 0, catchLightX, catchLightY, catchSize);
                     catchGrad.addColorStop(0, `rgba(255,255,255,${catchAlpha})`);
+                    catchGrad.addColorStop(0.6, `rgba(${baseR},${baseG},${baseB},${(parseFloat(catchAlpha) * 0.3).toFixed(2)})`);
                     catchGrad.addColorStop(1, 'rgba(255,255,255,0)');
                     this.ctx.fillStyle = catchGrad;
                     this.ctx.beginPath();
@@ -296,13 +348,13 @@ export function installRendererCrystal(Renderer) {
                 // High-detail sheen with time-varying caustics
                 if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill) {
                     // Caustic/refraction pattern that shifts with time and breathing
-                    const causticOffset = Math.sin(time * 1.5 + c.lightPhase) * 0.15;
-                    const sheenStop1 = 0.3 + causticOffset;
-                    const sheenStop2 = 0.55 + causticOffset * 0.5;
+                    const causticOffset = Math.sin(time * 1.5 + c.lightPhase + phaseOff * 0.3) * 0.15;
+                    const sheenStop1 = 0.3 + causticOffset + specularStrength * 0.08;
+                    const sheenStop2 = 0.55 + causticOffset * 0.5 + ageBreathe * 0.04;
                     const sheen = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
                     sheen.addColorStop(0, 'rgba(255,255,255,0)');
-                    sheen.addColorStop(Math.max(0.05, sheenStop1), 'rgba(180,255,255,0.2)');
-                    sheen.addColorStop(Math.min(0.95, sheenStop2), 'rgba(255,160,255,0.18)');
+                    sheen.addColorStop(Math.max(0.05, sheenStop1), `rgba(180,255,255,${(0.2 + specularStrength * 0.12).toFixed(2)})`);
+                    sheen.addColorStop(Math.min(0.95, sheenStop2), `rgba(255,160,255,${(0.18 + breathePhase * 0.04).toFixed(2)})`);
                     sheen.addColorStop(1, 'rgba(255,255,255,0)');
                     this.ctx.fillStyle = sheen;
                     this.ctx.beginPath();
@@ -311,23 +363,37 @@ export function installRendererCrystal(Renderer) {
                     this.ctx.lineTo(cx + halfW * 0.25, baseY);
                     this.ctx.closePath();
                     this.ctx.fill();
+
+                    // JUICE: Secondary caustic band — sweeps with crystal age for living depth
+                    const caustic2 = Math.sin(time * 0.9 + c.age * 0.04 + phaseOff) * 0.12;
+                    const bandY = c.type === 'top'
+                        ? baseY + (tipY - baseY) * (0.45 + caustic2)
+                        : baseY - (baseY - tipY) * (0.45 + caustic2);
+                    this.ctx.fillStyle = `rgba(255,255,255,${(0.04 + specularStrength * 0.06).toFixed(2)})`;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(cx - halfW * 0.4, bandY - halfW * 0.06);
+                    this.ctx.lineTo(cx + tilt * 0.3, bandY + halfW * 0.06);
+                    this.ctx.lineTo(cx + halfW * 0.4, bandY - halfW * 0.06);
+                    this.ctx.closePath();
+                    this.ctx.fill();
                 }
         
                 // Internal cracks for taller crystals (high only, seeded)
                 if (!colorOverride && profile.crystalDetail === 'high' && renderHeight > 80 && !useSolidFill) {
-                    const crackCount = Math.min(4, Math.floor((renderHeight - 80) / 40) + 1);
+                    const crackCount = Math.min(5, Math.floor((renderHeight - 80) / 35) + 1);
                     const crackSeed = c.crackSeed || seed;
-                    this.ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                    const crackDrift = Math.sin(time * 0.8 + c.lightPhase) * 0.04;
+                    this.ctx.strokeStyle = `rgba(255,255,255,${(0.08 + Math.abs(breathePhase) * 0.03).toFixed(2)})`;
                     this.ctx.lineWidth = 0.5;
                     for (let ci = 0; ci < crackCount; ci++) {
                         const t = ((crackSeed * 7 + ci * 0.31) % 1);
                         const crackStartY = c.type === 'top'
-                            ? baseY + (tipY - baseY) * (0.2 + t * 0.5)
-                            : baseY - (baseY - tipY) * (0.2 + t * 0.5);
+                            ? baseY + (tipY - baseY) * (0.18 + t * 0.52 + crackDrift)
+                            : baseY - (baseY - tipY) * (0.18 + t * 0.52 + crackDrift);
                         const crackEndY = c.type === 'top'
-                            ? crackStartY + (tipY - baseY) * 0.25
-                            : crackStartY - (baseY - tipY) * 0.25;
-                        const crackX = cx + (t - 0.5) * halfW * 0.8;
+                            ? crackStartY + (tipY - baseY) * (0.22 + Math.abs(ageBreathe) * 0.06)
+                            : crackStartY - (baseY - tipY) * (0.22 + Math.abs(ageBreathe) * 0.06);
+                        const crackX = cx + (t - 0.5) * halfW * (0.8 + breathePhase * 0.05);
                         const crackMidX = crackX + ((crackSeed * 3 + ci) % 1 - 0.5) * halfW * 0.3;
                         this.ctx.beginPath();
                         this.ctx.moveTo(crackX, crackStartY);
@@ -340,16 +406,16 @@ export function installRendererCrystal(Renderer) {
         
                 // Critical state: danger cracks with pulsing internal "lava" lines
                 if (c.isCritical && !colorOverride && profile.crystalDetail !== 'low') {
-                    const dangerPulse = Math.sin(timestamp / 80) * 0.5 + 0.5;
+                    const dangerPulse = Math.sin(timestamp / 80 + phaseOff) * 0.5 + 0.5;
                     const dangerAlpha = (0.3 + dangerPulse * 0.5).toFixed(2);
                     this.ctx.strokeStyle = `rgba(255, ${Math.floor(30 + dangerPulse * 50)}, 0, ${dangerAlpha})`;
-                    this.ctx.lineWidth = 1.5;
+                    this.ctx.lineWidth = isHighDetail ? 2 : 1.5;
                     const crackSeed = c.crackSeed || seed;
-                    // Draw 2-3 animated danger cracks
-                    for (let ci = 0; ci < 3; ci++) {
+                    const dangerCrackCount = isHighDetail ? 4 : 3;
+                    for (let ci = 0; ci < dangerCrackCount; ci++) {
                         const t = ((crackSeed * 5 + ci * 0.37) % 1);
                         const startProgress = 0.15 + t * 0.3;
-                        const endProgress = startProgress + 0.3 + dangerPulse * 0.1;
+                        const endProgress = startProgress + 0.3 + dangerPulse * 0.12;
                         const crackStartY = c.type === 'top'
                             ? baseY + (tipY - baseY) * startProgress
                             : baseY - (baseY - tipY) * startProgress;
@@ -359,9 +425,33 @@ export function installRendererCrystal(Renderer) {
                         const crackX = cx + (t - 0.5) * halfW * 0.6;
                         this.ctx.beginPath();
                         this.ctx.moveTo(crackX, crackStartY);
-                        this.ctx.lineTo(crackX + Math.sin(timestamp / 200 + ci) * halfW * 0.15, (crackStartY + crackEndY) / 2);
+                        this.ctx.lineTo(crackX + Math.sin(timestamp / 200 + ci + phaseOff) * halfW * 0.15, (crackStartY + crackEndY) / 2);
                         this.ctx.lineTo(crackX, crackEndY);
                         this.ctx.stroke();
+                    }
+
+                    // JUICE: Internal glow veins on critical high detail — fill modulation, no extra blur
+                    if (isHighDetail) {
+                        const veinPulse = (0.25 + dangerPulse * 0.45).toFixed(2);
+                        const prevOp = this.ctx.globalCompositeOperation;
+                        this.ctx.globalCompositeOperation = 'lighter';
+                        for (let vi = 0; vi < 2; vi++) {
+                            const vt = ((crackSeed * 11 + vi * 0.43 + phaseOff * 0.1) % 1);
+                            const veinY = c.type === 'top'
+                                ? baseY + (tipY - baseY) * (0.35 + vt * 0.35)
+                                : baseY - (baseY - tipY) * (0.35 + vt * 0.35);
+                            const veinX = cx + (vt - 0.5) * halfW * 0.5;
+                            const veinR = halfW * (0.12 + dangerPulse * 0.08);
+                            const veinGrad = this.ctx.createRadialGradient(veinX, veinY, 0, veinX, veinY, veinR);
+                            veinGrad.addColorStop(0, `rgba(255,${Math.floor(80 + dangerPulse * 100)},20,${veinPulse})`);
+                            veinGrad.addColorStop(0.5, `rgba(255,40,0,${(parseFloat(veinPulse) * 0.4).toFixed(2)})`);
+                            veinGrad.addColorStop(1, 'rgba(255,0,0,0)');
+                            this.ctx.fillStyle = veinGrad;
+                            this.ctx.beginPath();
+                            this.ctx.arc(veinX, veinY, veinR, 0, Math.PI * 2);
+                            this.ctx.fill();
+                        }
+                        this.ctx.globalCompositeOperation = prevOp;
                     }
                     this.ctx.lineWidth = baseLineWidth;
                 }
@@ -429,20 +519,25 @@ export function installRendererCrystal(Renderer) {
         
             // Use cached shard config index from crystal
             const config = shardConfigs[c.shardConfigIndex || 0] || shardConfigs[0];
-            config.shards.forEach(shard => {
-                drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle);
+            config.shards.forEach((shard, shardIndex) => {
+                drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle, shardIndex);
             });
         
             // Post-geometry: layered soft glow (replaces some shadowBlur dependency)
             if (!colorOverride && profile.crystalDetail !== 'low' && !useSolidFill && c.flash < 0.3) {
-                const glowCenterY = c.type === 'top' ? (renderHeight * heightScale * 0.4) : (this.height - renderHeight * heightScale * 0.4);
+                const glowCenterY = c.type === 'top'
+                    ? shakeY + (renderHeight * heightScale * 0.4)
+                    : shakeY + (this.height - renderHeight * heightScale * 0.4);
                 const glowRadius = width * 0.6;
-                const rgb = this.hexToRgb(col.hex) || {r:255, g:255, b:255};
                 const prevOp = this.ctx.globalCompositeOperation;
                 this.ctx.globalCompositeOperation = 'lighter';
                 const glowGrad = this.ctx.createRadialGradient(xCenter, glowCenterY, 0, xCenter, glowCenterY, glowRadius);
-                glowGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`);
-                glowGrad.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.05)`);
+                const glowAlpha = c.isCritical && isHighDetail ? (0.14 + critPulse * 0.12) : 0.12;
+                glowGrad.addColorStop(0, `rgba(${baseR}, ${baseG}, ${baseB}, ${glowAlpha.toFixed(2)})`);
+                if (c.isCritical && isHighDetail) {
+                    glowGrad.addColorStop(0.35, `rgba(255,${Math.floor(60 + critPulse * 80)},20,${(0.08 + critPulse * 0.1).toFixed(2)})`);
+                }
+                glowGrad.addColorStop(0.5, `rgba(${baseR}, ${baseG}, ${baseB}, 0.05)`);
                 glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
                 this.ctx.fillStyle = glowGrad;
                 this.ctx.beginPath();

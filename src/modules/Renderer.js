@@ -1,4 +1,4 @@
-import { GAME_CONFIG, RENDER_QUALITY_PROFILES, EMERGENCY_PARTICLE_STRIDE_BOOST } from './RendererConstants.js';
+import { GAME_CONFIG, RENDER_QUALITY_PROFILES, resolveParticleStride } from './RendererConstants.js';
 import { installRendererPostEffects } from './RendererPostEffects.js';
 import { installRendererInterfaceEffects } from './RendererInterfaceEffects.js';
 import { installRendererCrystal } from './RendererCrystal.js';
@@ -211,19 +211,12 @@ export class Renderer {
         }
 
         const particleLimit = Math.min(profile.maxParticles, particleCount);
-        const stride = particleCount > profile.maxParticles ? profile.particleStride + EMERGENCY_PARTICLE_STRIDE_BOOST : profile.particleStride;
-        for (let i = 0; i < particleLimit; i += stride) {
-            const p = gameState.particles[i];
-            if (p.isTrail) {
-                const s = p.size;
-                if (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height) continue;
-                this.drawTrailParticle(p);
-            } else {
-                const s = p.size * (p.life / p.maxLife);
-                if (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height) continue;
-                this.drawParticle(p);
-            }
+        const frameMs = gameState.perfMetrics ? gameState.perfMetrics.smoothedFrameMs : 16.7;
+        const stride = resolveParticleStride(profile, particleCount, gameState.adaptiveOverrides, frameMs);
+        if (gameState.perfMetrics) {
+            gameState.perfMetrics.particleStride = stride;
         }
+        this.drawParticlesBatched(gameState.particles, particleLimit, stride, gameState);
 
         if (gameState.shockwaves) {
             for (let i = 0; i < gameState.shockwaves.length; i++) {
@@ -287,6 +280,11 @@ export class Renderer {
         // 5. Impact flash (always active when triggered, on top of everything)
         if (gameState.impactFlash > 0) {
             this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
+        }
+
+        // JUICE: Dev-only perf overlay (toggle P or window.__DEV_PERF__)
+        if (gameState.devPerfOverlay) {
+            this.drawDevMetricsOverlay(gameState, profile);
         }
     }
 

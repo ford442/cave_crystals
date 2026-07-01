@@ -61,6 +61,22 @@ export class Game {
             slowMoTimer: 0,
             qualityMode: 'auto',
             renderQuality: 'high',
+            devPerfOverlay: false,
+            perfMetrics: {
+                fps: 0,
+                smoothedFps: 60,
+                frameMs: 0,
+                smoothedFrameMs: 16.7,
+                particleCount: 0,
+                particleLimit: 0,
+                particleStride: 1,
+                envParticleCount: 0,
+                shockwaveCount: 0
+            },
+            adaptiveOverrides: {
+                particleStrideBoost: 0,
+                effectScale: 1.0
+            },
             laneMap: new Map(), // key: lane, value: { top: crystal, bottom: crystal }
             energyRings: [],
             envParticles: []
@@ -96,9 +112,20 @@ export class Game {
         this._boundUpdateUI = this.updateUI.bind(this);
         this._boundOnSporeScore = this._onSporeScore.bind(this);
 
+        this._ambientBatch = new Array(512);
+
+        if (typeof window !== 'undefined' && window.__DEV_PERF__) {
+            this.state.devPerfOverlay = true;
+        }
+
         this.bindEvents();
         this.resize();
         requestAnimationFrame(this._boundLoop);
+    }
+
+    toggleDevPerfOverlay(force) {
+        this.state.devPerfOverlay = typeof force === 'boolean' ? force : !this.state.devPerfOverlay;
+        return this.state.devPerfOverlay;
     }
 
     bindEvents() {
@@ -111,6 +138,11 @@ export class Game {
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         window.addEventListener('mousedown', (e) => this.handleInput(e));
         window.addEventListener('touchstart', (e) => this.handleTouch(e));
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyP' && !e.repeat) {
+                this.toggleDevPerfOverlay();
+            }
+        });
     }
 
     resize() {
@@ -355,6 +387,12 @@ export class Game {
     }
 
     createTrailParticle(x, y, color) {
+        const count = this.state.particles.length;
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+        const maxP = profile.maxParticles;
+        if (count >= maxP) return;
+        if (count > maxP * 0.85 && Math.random() > 0.4) return;
+        if (count > maxP * 0.7 && Math.random() > 0.65) return;
         this.state.particles.push(this.trailPool.acquire(x, y, color));
     }
 

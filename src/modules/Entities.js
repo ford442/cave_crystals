@@ -82,7 +82,7 @@ export class Crystal {
         }
 
         // Spring-animate displayHeight toward logical height for "push upward" feel
-        const dhResult = springStep(this.displayHeight, this.displayHeightVel, this.height, 0.12, 0.82, timeScale);
+        const dhResult = springStep(this.displayHeight, this.displayHeightVel, this.height, 0.14, 0.80, timeScale);
         this.displayHeight = dhResult.pos;
         this.displayHeightVel = dhResult.vel;
 
@@ -455,6 +455,31 @@ export class Particle {
         // Decay: clamp timeScale so slow-mo doesn't make particles immortal
         const lifeDecayScale = Math.max(timeScale, 0.25);
         this.life -= 0.015 * lifeDecayScale;
+        this._cacheDrawState(rendererWidth, rendererHeight);
+    }
+
+    // JUICE: Fast integrator for aura/ember — no wall bounce callbacks
+    updateAmbient(rendererWidth, rendererHeight, timeScale = 1.0) {
+        this.x += this.vx * timeScale;
+        this.y += this.vy * timeScale;
+        this.vy += this.gravity * timeScale;
+        const adjFriction = 1 - (1 - this.friction) * timeScale;
+        this.vx *= adjFriction;
+        this.vy *= adjFriction;
+        this.rotation += this.rotationSpeed * timeScale;
+        this.angleX += this.velAngleX * timeScale;
+        this.angleY += this.velAngleY * timeScale;
+        const lifeDecayScale = Math.max(timeScale, 0.25);
+        this.life -= 0.015 * lifeDecayScale;
+        this._cacheDrawState(rendererWidth, rendererHeight);
+    }
+
+    _cacheDrawState(rendererWidth, rendererHeight) {
+        this._drawAlpha = this.life / this.maxLife;
+        this._screenSize = this.size * this._drawAlpha;
+        const s = this._screenSize;
+        this._onScreen = this.x + s >= 0 && this.x - s <= rendererWidth
+            && this.y + s >= 0 && this.y - s <= rendererHeight;
     }
 }
 
@@ -480,12 +505,18 @@ export class TrailParticle {
         this._init(x, y, color);
     }
 
-    update(timeScale = 1.0) {
+    update(timeScale = 1.0, rendererWidth = 0, rendererHeight = 0) {
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
         const lifeDecayScale = Math.max(timeScale, 0.25);
         this.life -= 0.05 * lifeDecayScale; // Fade fast
         this.size *= (1 - 0.1 * timeScale); // Shrink
+        this._drawAlpha = this.life;
+        this._screenSize = this.size;
+        const s = this.size;
+        this._onScreen = rendererWidth > 0
+            ? (this.x + s >= 0 && this.x - s <= rendererWidth && this.y + s >= 0 && this.y - s <= rendererHeight)
+            : true;
     }
 }
 
