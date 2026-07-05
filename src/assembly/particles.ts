@@ -64,6 +64,11 @@ const SIMPLE_BATCH_STRIDE: i32 = 7;
 // Layout per particle: x, y, vx, vy, life, gravity, friction
 const _simpleBatch = new Float64Array(SIMPLE_BATCH_MAX * SIMPLE_BATCH_STRIDE);
 
+const TRAIL_BATCH_MAX: i32 = 512;
+const TRAIL_BATCH_STRIDE: i32 = 6;
+// Layout per trail: x, y, vx, vy, life, size
+const _trailBatch = new Float64Array(TRAIL_BATCH_MAX * TRAIL_BATCH_STRIDE);
+
 export function getSimpleBatchByteOffset(): i32 {
     return _simpleBatch.byteOffset;
 }
@@ -74,6 +79,49 @@ export function getSimpleBatchFloatCount(): i32 {
 
 export function getSimpleBatchStride(): i32 {
     return SIMPLE_BATCH_STRIDE;
+}
+
+export function getTrailBatchByteOffset(): i32 {
+    return _trailBatch.byteOffset;
+}
+
+export function getTrailBatchFloatCount(): i32 {
+    return TRAIL_BATCH_MAX * TRAIL_BATCH_STRIDE;
+}
+
+export function getTrailBatchStride(): i32 {
+    return TRAIL_BATCH_STRIDE;
+}
+
+/**
+ * Integrate trail particles in a single WASM pass (drift, fade, shrink).
+ */
+export function batchIntegrateTrailParticles(count: i32, timeScale: f64): void {
+    const stride = TRAIL_BATCH_STRIDE;
+    const cap = count > TRAIL_BATCH_MAX ? TRAIL_BATCH_MAX : count;
+    const lifeDecayScale = timeScale < 0.25 ? 0.25 : timeScale;
+    const shrink = 1.0 - 0.1 * timeScale;
+    for (let i: i32 = 0; i < cap; i++) {
+        const base = i * stride;
+        let x = _trailBatch[base];
+        let y = _trailBatch[base + 1];
+        let vx = _trailBatch[base + 2];
+        let vy = _trailBatch[base + 3];
+        let life = _trailBatch[base + 4];
+        let size = _trailBatch[base + 5];
+
+        x += vx * timeScale;
+        y += vy * timeScale;
+        life -= 0.05 * lifeDecayScale;
+        size *= shrink;
+
+        _trailBatch[base] = x;
+        _trailBatch[base + 1] = y;
+        _trailBatch[base + 2] = vx;
+        _trailBatch[base + 3] = vy;
+        _trailBatch[base + 4] = life;
+        _trailBatch[base + 5] = size;
+    }
 }
 
 /**

@@ -2,7 +2,12 @@ import { COLORS } from './RendererConstants.js';
 
 export function installRendererCrystal(Renderer) {
     Object.assign(Renderer.prototype, {
-        drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now(), launcher = null, spores = []) {
+        drawComplexCrystal(c, colorOverride = null, particleCount = 0, profile = this._qualityProfiles.high, timestamp = performance.now(), launcher = null, spores = [], distortionX = 0, distortionY = 0) {
+            const distortionApplied = distortionX !== 0 || distortionY !== 0;
+            if (distortionApplied) {
+                this.ctx.save();
+                this.ctx.translate(distortionX, distortionY);
+            }
             // JUICE: Apply stress shake + micro-jitter to position
             const shakeX = (c.shakeX || 0) + (c.jitterX || 0);
             const shakeY = (c.shakeY || 0) + (c.jitterY || 0);
@@ -33,7 +38,7 @@ export function installRendererCrystal(Renderer) {
             const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
         
             // Compute lighting context: direction and intensity from nearby bright objects
-            const crystalCenterY = c.type === 'top' ? (renderHeight * heightScale) / 2 : this.height - (renderHeight * heightScale) / 2;
+            const crystalCenterY = c.type === 'top' ? (renderHeight * animHeightScale) / 2 : this.height - (renderHeight * animHeightScale) / 2;
             let lightDirX = 0;
             let lightDirY = 0;
             let lightIntensity = 0;
@@ -74,6 +79,15 @@ export function installRendererCrystal(Renderer) {
             const breathePhase = Math.sin(time * 1.2 + c.lightPhase);
             const ageBreathe = Math.sin(c.age * 0.05 + c.lightPhase * 0.7);
             const critPulse = c.isCritical ? (Math.sin(timestamp / 70) * 0.5 + 0.5) : 0;
+            // JUICE: Growth surge — displayHeight spring velocity widens crystal during push
+            const growthPush = isHighDetail
+                ? Math.min(0.04, Math.max(-0.012, (c.displayHeightVel || 0) * 0.014))
+                : 0;
+            const animHeightScale = heightScale * (1 + growthPush);
+            // Precomputed caustic waves — reused per shard (avoids redundant trig)
+            const causticWave = isHighDetail ? Math.sin(time * 1.5 + c.lightPhase) : 0;
+            const causticAgeWave = isHighDetail ? Math.sin(time * 0.9 + c.age * 0.04) : 0;
+            const facetDensity = c.facetDensity !== undefined ? c.facetDensity : 0.75;
             const baseRgb = this.hexToRgb(col.hex);
             const baseR = baseRgb ? baseRgb.r : 255;
             const baseG = baseRgb ? baseRgb.g : 255;
@@ -135,7 +149,7 @@ export function installRendererCrystal(Renderer) {
                 const shardBreathe = isHighDetail ? (1 + breathePhase * 0.012 + ageBreathe * 0.006) : 1;
 
                 // Apply height scale to the crystal height (use animated displayHeight for rendering)
-                const h = renderHeight * hScale * heightScale * shardBreathe * (1 + critThrob);
+                const h = renderHeight * hScale * animHeightScale * shardBreathe * (1 + critThrob);
                 const w = width * wScale * (1 - critThrob * 0.35);
                 const halfW = w / 2;
                 const baseY = ((c.type === 'top') ? 0 : this.height) + shakeY;
@@ -149,6 +163,7 @@ export function installRendererCrystal(Renderer) {
                 const specularDot = Math.max(0, facetNormX * normLightX + facetNormY * normLightY * 0.5);
                 const specularStrength = specularDot * lightIntensity;
                 const critSpecBoost = c.isCritical && isHighDetail ? critPulse * 0.35 : 0;
+                const specularHot = lightIntensity > 0.45 && isHighDetail ? (lightIntensity - 0.45) * 0.8 : 0;
         
                 if (!colorOverride) {
                     if (useSolidFill) {
@@ -163,7 +178,7 @@ export function installRendererCrystal(Renderer) {
                              grad.addColorStop(1, '#fff');
                         } else {
                              // Light-responsive gradient: brighter on lit side
-                             const litBoost = Math.floor((specularStrength + critSpecBoost) * 48);
+                             const litBoost = Math.floor((specularStrength + critSpecBoost + specularHot) * 48);
                              const litColor = `rgb(${Math.min(255, baseR + litBoost)}, ${Math.min(255, baseG + litBoost)}, ${Math.min(255, baseB + litBoost)})`;
                              const darkStop = isHighDetail
                                  ? this.darkenColor(col.hex, 0.28 + breathePhase * 0.04)
@@ -192,20 +207,21 @@ export function installRendererCrystal(Renderer) {
                     // Create a more complex, multi-faceted shape
                     const segments = 5;
                     const angleVariation = tilt / segments;
+                    const facetWiggle = isHighDetail ? breathePhase * 0.08 + ageBreathe * 0.04 : 0;
                     
                     if (c.type === 'top') {
                         this.ctx.moveTo(cx - halfW, baseY);
                         for (let i = 1; i < segments; i++) {
                             const progress = i / segments;
                             const yPos = baseY + (tipY - baseY) * progress;
-                            const xOffset = Math.sin(progress * Math.PI) * angleVariation;
+                            const xOffset = Math.sin(progress * Math.PI + facetWiggle) * angleVariation;
                             this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
                         }
                         this.ctx.lineTo(cx + tilt, tipY);
                         for (let i = segments - 1; i > 0; i--) {
                             const progress = i / segments;
                             const yPos = baseY + (tipY - baseY) * progress;
-                            const xOffset = -Math.sin(progress * Math.PI) * angleVariation;
+                            const xOffset = -Math.sin(progress * Math.PI + facetWiggle) * angleVariation;
                             this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
                         }
                         this.ctx.lineTo(cx + halfW, baseY);
@@ -214,14 +230,14 @@ export function installRendererCrystal(Renderer) {
                         for (let i = 1; i < segments; i++) {
                             const progress = i / segments;
                             const yPos = baseY - (baseY - tipY) * progress;
-                            const xOffset = Math.sin(progress * Math.PI) * angleVariation;
+                            const xOffset = Math.sin(progress * Math.PI + facetWiggle) * angleVariation;
                             this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
                         }
                         this.ctx.lineTo(cx + tilt, tipY);
                         for (let i = segments - 1; i > 0; i--) {
                             const progress = i / segments;
                             const yPos = baseY - (baseY - tipY) * progress;
-                            const xOffset = -Math.sin(progress * Math.PI) * angleVariation;
+                            const xOffset = -Math.sin(progress * Math.PI + facetWiggle) * angleVariation;
                             this.ctx.lineTo(cx + xOffset + tilt * progress, yPos);
                         }
                         this.ctx.lineTo(cx + halfW, baseY);
@@ -241,6 +257,19 @@ export function installRendererCrystal(Renderer) {
         
                 this.ctx.fill();
                 this.ctx.stroke();
+
+                // JUICE: Prismatic lit-edge accent on multifacet shards (high detail, no extra blur)
+                if (useMultifacet && isHighDetail && !colorOverride && c.flash < 0.5 && (specularStrength > 0.15 || specularHot > 0)) {
+                    const prismAlpha = (0.12 + specularStrength * 0.2 + specularHot * 0.15).toFixed(2);
+                    this.ctx.strokeStyle = `rgba(${Math.min(255, baseR + 60)},${Math.min(255, baseG + 40)},255,${prismAlpha})`;
+                    this.ctx.lineWidth = 1.2;
+                    this.ctx.beginPath();
+                    const litEdgeX = cx + (normLightX > 0 ? -halfW * 0.85 : halfW * 0.85);
+                    this.ctx.moveTo(litEdgeX, baseY);
+                    this.ctx.lineTo(cx + tilt * 0.9, tipY);
+                    this.ctx.stroke();
+                    this.ctx.lineWidth = baseLineWidth;
+                }
         
                 // Enhanced internal facets with multiple layers
                 if (!colorOverride && c.flash < 0.5 && profile.crystalDetail !== 'low') {
@@ -293,9 +322,9 @@ export function installRendererCrystal(Renderer) {
                     this.ctx.lineTo(cx + halfW*0.3, baseY);
                     this.ctx.stroke();
 
-                    // JUICE: Extra facet lattice lines on high detail — density modulated by age
+                    // JUICE: Extra facet lattice lines on high detail — density modulated by age + facetDensity
                     if (isHighDetail) {
-                        const latticeAlpha = (0.06 + Math.abs(ageBreathe) * 0.05).toFixed(2);
+                        const latticeAlpha = (0.06 + Math.abs(ageBreathe) * 0.05 + facetDensity * 0.03).toFixed(2);
                         this.ctx.strokeStyle = `rgba(200,240,255,${latticeAlpha})`;
                         const latticeY1 = c.type === 'top'
                             ? baseY + (tipY - baseY) * (0.25 + breathePhase * 0.03)
@@ -308,8 +337,33 @@ export function installRendererCrystal(Renderer) {
                         this.ctx.lineTo(cx + tilt * 0.2, latticeY2);
                         this.ctx.lineTo(cx + halfW * 0.45, latticeY1);
                         this.ctx.stroke();
+                        if (facetDensity > 0.72) {
+                            const latticeY3 = c.type === 'top'
+                                ? baseY + (tipY - baseY) * (0.48 + ageBreathe * 0.04)
+                                : baseY - (baseY - tipY) * (0.48 + ageBreathe * 0.04);
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(cx - halfW * 0.2, latticeY3);
+                            this.ctx.lineTo(cx + tilt * 0.55, latticeY3 + (c.type === 'top' ? halfW * 0.04 : -halfW * 0.04));
+                            this.ctx.lineTo(cx + halfW * 0.2, latticeY3);
+                            this.ctx.stroke();
+                        }
                     }
                     this.ctx.lineWidth = baseLineWidth;
+
+                    // JUICE: Deep gem core — solid inner facet, cheap fill, high detail only
+                    if (isHighDetail && c.flash < 0.4) {
+                        const coreAlpha = (0.07 + specularStrength * 0.1 + breathePhase * 0.02).toFixed(2);
+                        this.ctx.fillStyle = `rgba(${baseR},${baseG},${baseB},${coreAlpha})`;
+                        const coreY = c.type === 'top'
+                            ? baseY + (tipY - baseY) * (0.42 + ageBreathe * 0.03)
+                            : baseY - (baseY - tipY) * (0.42 + ageBreathe * 0.03);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(cx, coreY - halfW * 0.12);
+                        this.ctx.lineTo(cx + halfW * 0.18, coreY + halfW * 0.08);
+                        this.ctx.lineTo(cx - halfW * 0.18, coreY + halfW * 0.08);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                    }
                 }
         
                 // Rim lighting (medium+high) — edge glow from nearby light sources
@@ -348,8 +402,8 @@ export function installRendererCrystal(Renderer) {
                 // High-detail sheen with time-varying caustics
                 if (!colorOverride && profile.crystalDetail === 'high' && !useSolidFill) {
                     // Caustic/refraction pattern that shifts with time and breathing
-                    const causticOffset = Math.sin(time * 1.5 + c.lightPhase + phaseOff * 0.3) * 0.15;
-                    const sheenStop1 = 0.3 + causticOffset + specularStrength * 0.08;
+                    const causticOffset = causticWave * 0.15;
+                    const sheenStop1 = 0.3 + causticOffset + specularStrength * 0.08 + specularHot * 0.05;
                     const sheenStop2 = 0.55 + causticOffset * 0.5 + ageBreathe * 0.04;
                     const sheen = this.ctx.createLinearGradient(cx - halfW, baseY, cx + halfW, tipY);
                     sheen.addColorStop(0, 'rgba(255,255,255,0)');
@@ -365,7 +419,7 @@ export function installRendererCrystal(Renderer) {
                     this.ctx.fill();
 
                     // JUICE: Secondary caustic band — sweeps with crystal age for living depth
-                    const caustic2 = Math.sin(time * 0.9 + c.age * 0.04 + phaseOff) * 0.12;
+                    const caustic2 = causticAgeWave * 0.12 + phaseOff * 0.02;
                     const bandY = c.type === 'top'
                         ? baseY + (tipY - baseY) * (0.45 + caustic2)
                         : baseY - (baseY - tipY) * (0.45 + caustic2);
@@ -380,9 +434,9 @@ export function installRendererCrystal(Renderer) {
         
                 // Internal cracks for taller crystals (high only, seeded)
                 if (!colorOverride && profile.crystalDetail === 'high' && renderHeight > 80 && !useSolidFill) {
-                    const crackCount = Math.min(5, Math.floor((renderHeight - 80) / 35) + 1);
+                    const crackCount = Math.min(6, Math.floor((renderHeight - 80) / 30) + 1 + (facetDensity > 0.8 ? 1 : 0));
                     const crackSeed = c.crackSeed || seed;
-                    const crackDrift = Math.sin(time * 0.8 + c.lightPhase) * 0.04;
+                    const crackDrift = causticWave * 0.04;
                     this.ctx.strokeStyle = `rgba(255,255,255,${(0.08 + Math.abs(breathePhase) * 0.03).toFixed(2)})`;
                     this.ctx.lineWidth = 0.5;
                     for (let ci = 0; ci < crackCount; ci++) {
@@ -432,10 +486,11 @@ export function installRendererCrystal(Renderer) {
 
                     // JUICE: Internal glow veins on critical high detail — fill modulation, no extra blur
                     if (isHighDetail) {
-                        const veinPulse = (0.25 + dangerPulse * 0.45).toFixed(2);
+                        const veinPulse = (0.25 + dangerPulse * 0.45 + critPulse * 0.15).toFixed(2);
                         const prevOp = this.ctx.globalCompositeOperation;
                         this.ctx.globalCompositeOperation = 'lighter';
-                        for (let vi = 0; vi < 2; vi++) {
+                        const veinCount = facetDensity > 0.85 ? 3 : 2;
+                        for (let vi = 0; vi < veinCount; vi++) {
                             const vt = ((crackSeed * 11 + vi * 0.43 + phaseOff * 0.1) % 1);
                             const veinY = c.type === 'top'
                                 ? baseY + (tipY - baseY) * (0.35 + vt * 0.35)
@@ -522,12 +577,51 @@ export function installRendererCrystal(Renderer) {
             config.shards.forEach((shard, shardIndex) => {
                 drawShard(shard.offsetX, shard.hScale, shard.wScale, shard.tilt, shard.facetStyle, shardIndex);
             });
+
+            // JUICE: Crystal-level tip corona + growth surge (high detail, once per crystal — not per shard)
+            if (isHighDetail && !colorOverride) {
+                const mainTipY = c.type === 'top'
+                    ? shakeY + renderHeight * animHeightScale
+                    : shakeY + (this.height - renderHeight * animHeightScale);
+                const prevOp = this.ctx.globalCompositeOperation;
+
+                if (c.isCritical) {
+                    const tipPulse = 0.5 + 0.5 * Math.sin(timestamp / 62 + c.lightPhase);
+                    this.ctx.globalCompositeOperation = 'lighter';
+                    const coronaR = width * (0.14 + tipPulse * 0.1);
+                    const coronaGrad = this.ctx.createRadialGradient(xCenter, mainTipY, 0, xCenter, mainTipY, coronaR);
+                    coronaGrad.addColorStop(0, `rgba(255,${Math.floor(100 + tipPulse * 120)},30,${(0.35 + tipPulse * 0.35).toFixed(2)})`);
+                    coronaGrad.addColorStop(0.45, `rgba(255,40,0,${(0.12 + tipPulse * 0.15).toFixed(2)})`);
+                    coronaGrad.addColorStop(1, 'rgba(255,0,0,0)');
+                    this.ctx.fillStyle = coronaGrad;
+                    this.ctx.beginPath();
+                    this.ctx.arc(xCenter, mainTipY, coronaR, 0, Math.PI * 2);
+                    this.ctx.fill();
+                } else if (Math.abs(c.displayHeightVel || 0) > 0.35 && growthPush > 0.005) {
+                    const surgeAlpha = Math.min(0.22, growthPush * 4).toFixed(2);
+                    const baseY = (c.type === 'top' ? 0 : this.height) + shakeY;
+                    this.ctx.globalCompositeOperation = 'screen';
+                    this.ctx.fillStyle = `rgba(${baseR},${baseG},${baseB},${surgeAlpha})`;
+                    this.ctx.fillRect(xCenter - width * 0.35, baseY - (c.type === 'top' ? 0 : 6), width * 0.7, 6);
+                } else if (lightIntensity > 0.35) {
+                    const tipGlowR = width * 0.1 * (1 + lightIntensity);
+                    this.ctx.globalCompositeOperation = 'lighter';
+                    const tipGrad = this.ctx.createRadialGradient(xCenter, mainTipY, 0, xCenter, mainTipY, tipGlowR);
+                    tipGrad.addColorStop(0, `rgba(255,255,255,${(lightIntensity * 0.25).toFixed(2)})`);
+                    tipGrad.addColorStop(1, `rgba(${baseR},${baseG},${baseB},0)`);
+                    this.ctx.fillStyle = tipGrad;
+                    this.ctx.beginPath();
+                    this.ctx.arc(xCenter, mainTipY, tipGlowR, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
+                this.ctx.globalCompositeOperation = prevOp;
+            }
         
             // Post-geometry: layered soft glow (replaces some shadowBlur dependency)
             if (!colorOverride && profile.crystalDetail !== 'low' && !useSolidFill && c.flash < 0.3) {
                 const glowCenterY = c.type === 'top'
-                    ? shakeY + (renderHeight * heightScale * 0.4)
-                    : shakeY + (this.height - renderHeight * heightScale * 0.4);
+                    ? shakeY + (renderHeight * animHeightScale * 0.4)
+                    : shakeY + (this.height - renderHeight * animHeightScale * 0.4);
                 const glowRadius = width * 0.6;
                 const prevOp = this.ctx.globalCompositeOperation;
                 this.ctx.globalCompositeOperation = 'lighter';
@@ -547,6 +641,7 @@ export function installRendererCrystal(Renderer) {
             }
         
             this.ctx.shadowBlur = 0;
+            if (distortionApplied) this.ctx.restore();
         }
         ,
         darkenColor(hex, amount) {
@@ -628,44 +723,176 @@ export function installRendererCrystal(Renderer) {
             this.ctx.restore();
         }
         ,
-        calculateShockwaveDistortion(x, y, gameState) {
-            if (!gameState.shockwaves || gameState.shockwaves.length === 0) return { x: 0, y: 0 };
-        
+        _computeShockwaveDistortionAt(x, y, shockwaves) {
+            if (!shockwaves || shockwaves.length === 0) return { x: 0, y: 0 };
+
             let dx = 0;
             let dy = 0;
             const bandWidth = 50;
-        
-            for (let i = 0; i < gameState.shockwaves.length; i++) {
-                const sw = gameState.shockwaves[i];
+
+            for (let i = 0; i < shockwaves.length; i++) {
+                const sw = shockwaves[i];
                 if (sw.life <= 0) continue;
-        
+
                 const distX = x - sw.x;
                 const distY = y - sw.y;
                 const distSq = distX * distX + distY * distY;
                 const outer = sw.radius + bandWidth;
-        
-                // Fast reject: if outside outer band, skip sqrt entirely
+
                 if (distSq > outer * outer) continue;
-        
-                // Fast reject: if inside inner band (hole), skip
+
                 if (sw.radius > bandWidth) {
                     const inner = sw.radius - bandWidth;
                     if (distSq < inner * inner) continue;
                 }
-        
+
                 const dist = Math.sqrt(distSq);
                 const delta = dist - sw.radius;
                 const t = delta / bandWidth;
                 const strength = Math.cos(t * Math.PI / 2);
                 const force = 15.0 * strength * sw.life;
-        
+
                 if (dist > 0) {
                     dx += (distX / dist) * force;
                     dy += (distY / dist) * force;
                 }
             }
-        
+
             return { x: dx, y: dy };
+        }
+        ,
+        prepareShockwaveDistortionField(gameState, profile, particleCount, launcher = null) {
+            const trackMs = gameState.devPerfOverlay;
+            this._distortionFieldTrackLookups = trackMs;
+            const t0 = trackMs ? performance.now() : 0;
+            this._distortionLookupCount = 0;
+
+            const shockwaves = gameState.shockwaves;
+            const field = this._distortionField || (this._distortionField = {
+                entityDx: new Float32Array(16),
+                entityDy: new Float32Array(16)
+            });
+
+            const hasSw = shockwaves && shockwaves.length > 0 && shockwaves.some(sw => sw.life > 0);
+            field.active = hasSw;
+            field.gridReady = false;
+            field.entityCount = 0;
+            field.launcherDx = 0;
+            field.launcherDy = 0;
+
+            if (!hasSw) {
+                if (trackMs && gameState.perfMetrics) {
+                    gameState.perfMetrics.distortionPrecomputeMs = performance.now() - t0;
+                    gameState.perfMetrics.distortionGridCells = 0;
+                }
+                return field;
+            }
+
+            field.shockwaves = shockwaves;
+
+            const crystals = gameState.crystals;
+            for (let i = 0; i < crystals.length; i++) {
+                const c = crystals[i];
+                const cX = (c.lane * this.laneWidth) + (this.laneWidth / 2);
+                const cY = c.type === 'top' ? c.height / 2 : this.height - (c.height / 2);
+                const d = this._computeShockwaveDistortionAt(cX, cY, shockwaves);
+                field.entityDx[i] = d.x;
+                field.entityDy[i] = d.y;
+            }
+            field.entityCount = crystals.length;
+
+            if (launcher) {
+                const ld = this._computeShockwaveDistortionAt(launcher.x, launcher.y, shockwaves);
+                field.launcherDx = ld.x;
+                field.launcherDy = ld.y;
+            }
+
+            const frameMs = gameState.perfMetrics?.smoothedFrameMs ?? 16.7;
+            const buildGrid = profile.allowGridDistortion && particleCount <= 40 && frameMs < 21;
+            if (buildGrid) {
+                const cellSize = particleCount > 30 ? profile.gridBase + 20 : profile.gridBase;
+                field.cellSize = cellSize;
+                field.cols = Math.ceil(this.width / cellSize) + 1;
+                field.rows = Math.ceil(this.height / cellSize) + 1;
+                const len = field.cols * field.rows;
+                if (!field.dx || field.dx.length < len) {
+                    field.dx = new Float32Array(len);
+                    field.dy = new Float32Array(len);
+                }
+                let cells = 0;
+                for (let row = 0; row < field.rows; row++) {
+                    for (let col = 0; col < field.cols; col++) {
+                        const d = this._computeShockwaveDistortionAt(col * cellSize, row * cellSize, shockwaves);
+                        const idx = row * field.cols + col;
+                        field.dx[idx] = d.x;
+                        field.dy[idx] = d.y;
+                        cells++;
+                    }
+                }
+                field.gridReady = true;
+                if (trackMs && gameState.perfMetrics) gameState.perfMetrics.distortionGridCells = cells;
+            } else if (trackMs && gameState.perfMetrics) {
+                gameState.perfMetrics.distortionGridCells = 0;
+            }
+
+            if (trackMs && gameState.perfMetrics) {
+                gameState.perfMetrics.distortionPrecomputeMs = performance.now() - t0;
+            }
+            return field;
+        }
+        ,
+        getCrystalDistortion(index) {
+            const field = this._distortionField;
+            if (!field || !field.active || index >= field.entityCount) return { x: 0, y: 0 };
+            return { x: field.entityDx[index], y: field.entityDy[index] };
+        }
+        ,
+        getLauncherDistortion() {
+            const field = this._distortionField;
+            if (!field || !field.active) return { x: 0, y: 0 };
+            return { x: field.launcherDx, y: field.launcherDy };
+        }
+        ,
+        getGridShockwaveDistortion(x, y) {
+            const field = this._distortionField;
+            if (!field || !field.gridReady) return { x: 0, y: 0 };
+
+            if (this._distortionFieldTrackLookups) this._distortionLookupCount++;
+            const cs = field.cellSize;
+            const col = x / cs;
+            const row = y / cs;
+            const c0 = Math.max(0, Math.min(Math.floor(col), field.cols - 1));
+            const r0 = Math.max(0, Math.min(Math.floor(row), field.rows - 1));
+            const fx = col - c0;
+            const fy = row - r0;
+            const c1 = Math.min(c0 + 1, field.cols - 1);
+            const r1 = Math.min(r0 + 1, field.rows - 1);
+
+            const i00 = r0 * field.cols + c0;
+            const i10 = r0 * field.cols + c1;
+            const i01 = r1 * field.cols + c0;
+            const i11 = r1 * field.cols + c1;
+            const w00 = (1 - fx) * (1 - fy);
+            const w10 = fx * (1 - fy);
+            const w01 = (1 - fx) * fy;
+            const w11 = fx * fy;
+
+            return {
+                x: field.dx[i00] * w00 + field.dx[i10] * w10 + field.dx[i01] * w01 + field.dx[i11] * w11,
+                y: field.dy[i00] * w00 + field.dy[i10] * w10 + field.dy[i01] * w01 + field.dy[i11] * w11
+            };
+        }
+        ,
+        calculateShockwaveDistortion(x, y, gameState) {
+            const field = this._distortionField;
+            if (field && field.gridReady) return this.getGridShockwaveDistortion(x, y);
+            if (field && field.active && field.shockwaves) {
+                return this._computeShockwaveDistortionAt(x, y, field.shockwaves);
+            }
+            if (gameState && gameState.shockwaves) {
+                return this._computeShockwaveDistortionAt(x, y, gameState.shockwaves);
+            }
+            return { x: 0, y: 0 };
         }
         
     });

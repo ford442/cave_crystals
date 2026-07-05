@@ -17,9 +17,15 @@ export function installRendererInterfaceEffects(Renderer) {
             const activeLane = launcher ? launcher.targetLane : -1;
             const activeX = (activeLane * this.laneWidth) + (this.laneWidth / 2);
         
-            // Skip expensive distortion when there are too many particles (chaos mode)
-            // or when no shockwaves are active
-            const hasActiveShockwaves = profile.allowGridDistortion && particleCount <= 40 && gameState.shockwaves && gameState.shockwaves.some(sw => sw.life > 0);
+            // Skip expensive distortion when under load, during chaos, or when no shockwaves are active
+            const frameMs = gameState.perfMetrics?.smoothedFrameMs ?? 16.7;
+            const hasActiveShockwaves = profile.allowGridDistortion
+                && particleCount <= 40
+                && frameMs < 21
+                && gameState.shockwaves
+                && gameState.shockwaves.some(sw => sw.life > 0)
+                && this._distortionField
+                && this._distortionField.gridReady;
         
             // Precompute breathe constants
             const cx = this.width / 2;
@@ -37,7 +43,7 @@ export function installRendererInterfaceEffects(Renderer) {
                  for (let x = 0; x <= this.width; x += gridSize) {
                      let distX = 0, distY = 0;
                      if (hasActiveShockwaves) {
-                         const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                         const dist = this.getGridShockwaveDistortion(x, y);
                          distX = dist.x;
                          distY = dist.y;
                      }
@@ -82,7 +88,7 @@ export function installRendererInterfaceEffects(Renderer) {
                  for (let y = 0; y <= this.height; y += gridSize) {
                      let distX = 0, distY = 0;
                      if (hasActiveShockwaves) {
-                         const dist = this.calculateShockwaveDistortion(x, y, gameState);
+                         const dist = this.getGridShockwaveDistortion(x, y);
                          distX = dist.x;
                          distY = dist.y;
                      }
@@ -495,18 +501,16 @@ export function installRendererInterfaceEffects(Renderer) {
             const alpha = Math.max(0, ring.life);
             this.ctx.globalCompositeOperation = 'lighter';
             this.ctx.shadowColor = ring.color;
-            this.ctx.shadowBlur = 12;
+            this.ctx.shadowBlur = ring.isFlash ? 18 : 12;
         
-            // Outer ring
-            this.ctx.globalAlpha = alpha * 0.85;
+            this.ctx.globalAlpha = alpha * (ring.isFlash ? 0.95 : 0.85);
             this.ctx.lineWidth = ring.width;
             this.ctx.strokeStyle = ring.color;
             this.ctx.beginPath();
             this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
             this.ctx.stroke();
         
-            // Inner echo for combos > 1
-            if (ring.comboLevel > 1 && ring.life > 0.25) {
+            if (!ring.isFlash && ring.comboLevel > 1 && ring.life > 0.25) {
                 this.ctx.globalAlpha = alpha * 0.35;
                 this.ctx.lineWidth = ring.width * 0.5;
                 this.ctx.beginPath();
@@ -538,6 +542,18 @@ export function installRendererInterfaceEffects(Renderer) {
                 this._drawSparkParticle(p, alpha, screenSize);
                 return;
             }
+            if (p.type === 'shard') {
+                this._drawShardParticle(p, alpha, screenSize);
+                return;
+            }
+            if (p.type === 'debris') {
+                this._drawDebrisParticle(p, alpha, screenSize);
+                return;
+            }
+            if (p.type === 'chunk') {
+                this._drawChunkParticle(p, alpha, screenSize);
+                return;
+            }
             this._drawPhysicalParticle(p, alpha, screenSize);
         }
         ,
@@ -557,15 +573,49 @@ export function installRendererInterfaceEffects(Renderer) {
         ,
         _drawEmberParticle(p, alpha) {
             const ctx = this.ctx;
+            const heat = p.emberHeat !== undefined ? p.emberHeat : 0.7;
             ctx.globalAlpha = alpha;
             ctx.fillStyle = p.color;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = '#ffff88';
+            const coreBright = heat > 0.65 ? '#ffffaa' : '#ff8844';
+            ctx.fillStyle = coreBright;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, p.size * (0.35 + heat * 0.15), 0, Math.PI * 2);
             ctx.fill();
+            if (heat > 0.75 && alpha > 0.4) {
+                ctx.globalAlpha = alpha * 0.45;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(p.x - p.size * 0.15, p.y - p.size * 0.15, p.size * 0.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ,
+        _drawTrailParticle(p, alpha) {
+            const ctx = this.ctx;
+            if (p.isEnergy && alpha > 0.04) {
+                const stretch = (p.wispStretch || 1.4) * (0.65 + alpha * 0.35);
+                const pulse = 0.85 + 0.15 * Math.sin((p.glowPhase || 0) + alpha * 8);
+                const r = p.size * stretch * pulse;
+                ctx.globalAlpha = alpha * 0.4;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.ellipse(p.x, p.y, r * 0.42, r, p.rotation, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = alpha * 0.85;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(0.7, p.size * 0.22), 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
         ,
         _drawSparkParticle(p, alpha, screenSize) {
@@ -591,6 +641,116 @@ export function installRendererInterfaceEffects(Renderer) {
             ctx.lineTo(-sz * 0.6, 0);
             ctx.closePath();
             ctx.fill();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        ,
+        _drawShardParticle(p, alpha, screenSize) {
+            const ctx = this.ctx;
+            if (screenSize < PARTICLE_LOD.cheapPhysicalSize) {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(1, screenSize * 0.5), 0, Math.PI * 2);
+                ctx.fill();
+                return;
+            }
+            ctx.globalAlpha = alpha;
+            const scaleX = Math.cos(p.angleX);
+            const scaleY = Math.cos(p.angleY);
+            const c = Math.cos(p.rotation);
+            const s = Math.sin(p.rotation);
+            ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
+            const facing = Math.abs(scaleX) > 0.85 && Math.abs(scaleY) > 0.85;
+            ctx.fillStyle = facing ? '#fff' : p.color;
+            if (p.polyPoints && p.polyPoints.length > 0) {
+                const shrink = alpha;
+                ctx.beginPath();
+                ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                for (let i = 1; i < p.polyPoints.length; i++) {
+                    ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.65 + alpha * 0.35})`;
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.fill();
+                if (facing) {
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.9})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -screenSize * 0.85);
+                    ctx.lineTo(0, screenSize * 0.5);
+                    ctx.stroke();
+                }
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        ,
+        _drawDebrisParticle(p, alpha, screenSize) {
+            const ctx = this.ctx;
+            if (screenSize < PARTICLE_LOD.cheapPhysicalSize) {
+                ctx.globalAlpha = alpha * 0.9;
+                ctx.fillStyle = '#666';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(1, screenSize * 0.5), 0, Math.PI * 2);
+                ctx.fill();
+                return;
+            }
+            ctx.globalAlpha = alpha;
+            const scaleX = Math.cos(p.angleX);
+            const scaleY = Math.cos(p.angleY);
+            const c = Math.cos(p.rotation);
+            const s = Math.sin(p.rotation);
+            ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
+            ctx.fillStyle = p.color;
+            if (p.polyPoints && p.polyPoints.length > 0) {
+                const shrink = alpha;
+                ctx.beginPath();
+                ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                for (let i = 1; i < p.polyPoints.length; i++) {
+                    ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = `rgba(40, 35, 30, ${0.5 + alpha * 0.3})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.fill();
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        ,
+        _drawChunkParticle(p, alpha, screenSize) {
+            const ctx = this.ctx;
+            if (screenSize < PARTICLE_LOD.cheapPhysicalSize) {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(1.5, screenSize * 0.6), 0, Math.PI * 2);
+                ctx.fill();
+                return;
+            }
+            ctx.globalAlpha = alpha;
+            const scaleX = Math.cos(p.angleX);
+            const scaleY = Math.cos(p.angleY);
+            const c = Math.cos(p.rotation);
+            const s = Math.sin(p.rotation);
+            ctx.setTransform(c * scaleX, s * scaleX, -s * scaleY, c * scaleY, p.x, p.y);
+            ctx.fillStyle = Math.abs(scaleX) > 0.9 && Math.abs(scaleY) > 0.9 ? '#ddd' : p.color;
+            if (p.polyPoints && p.polyPoints.length > 0) {
+                const shrink = alpha;
+                ctx.beginPath();
+                ctx.moveTo(p.polyPoints[0].x * shrink, p.polyPoints[0].y * shrink);
+                for (let i = 1; i < p.polyPoints.length; i++) {
+                    ctx.lineTo(p.polyPoints[i].x * shrink, p.polyPoints[i].y * shrink);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = 'rgba(20, 15, 10, 0.75)';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+                ctx.fill();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+                ctx.fill();
+            }
             ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
         ,
@@ -643,21 +803,36 @@ export function installRendererInterfaceEffects(Renderer) {
             const ctx = this.ctx;
             const trackMs = gameState && gameState.devPerfOverlay;
             const t0 = trackMs ? performance.now() : 0;
+            const w = this.width;
+            const h = this.height;
 
-            // Pass 1: trails — single lighter composite for the whole group
+            const isOffscreen = (p, pad) => {
+                if (p._onScreen === false) return true;
+                if (p._onScreen !== undefined) return false;
+                return p.x + pad < 0 || p.x - pad > w || p.y + pad < 0 || p.y - pad > h;
+            };
+
+            // Pass 1: trails — lighter composite, cheap rects for plain motes
             ctx.globalCompositeOperation = 'lighter';
+            let trailFill = null;
             for (let i = 0; i < particleLimit; i++) {
                 const p = particles[i];
                 if (!p.isTrail) continue;
                 if (!shouldDrawParticleWithStride(i, p, stride)) continue;
-                if (p._onScreen === false) continue;
                 const s = p.size;
-                if (p._onScreen === undefined && (p.x + s < 0 || p.x - s > this.width || p.y + s < 0 || p.y - s > this.height)) continue;
-                ctx.globalAlpha = p._drawAlpha !== undefined ? p._drawAlpha : p.life;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
-                ctx.fill();
+                if (isOffscreen(p, s)) continue;
+                const alpha = p._drawAlpha !== undefined ? p._drawAlpha : p.life;
+                if (!p.isEnergy && s <= PARTICLE_LOD.cheapTrailSize) {
+                    ctx.globalAlpha = alpha;
+                    if (p.color !== trailFill) {
+                        ctx.fillStyle = p.color;
+                        trailFill = p.color;
+                    }
+                    const d = Math.max(1, s);
+                    ctx.fillRect(p.x - d * 0.5, p.y - d * 0.5, d, d);
+                } else {
+                    this._drawTrailParticle(p, alpha);
+                }
             }
 
             // Pass 2: aura glows
@@ -665,9 +840,8 @@ export function installRendererInterfaceEffects(Renderer) {
                 const p = particles[i];
                 if (p.isTrail || p.type !== 'aura') continue;
                 if (!shouldDrawParticleWithStride(i, p, stride)) continue;
-                if (p._onScreen === false) continue;
+                if (isOffscreen(p, p.size * 3.5)) continue;
                 const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
-                if (p.size < PARTICLE_LOD.cheapAuraSize && stride > 1 && (i % stride) !== 0) continue;
                 this._drawAuraParticle(p, alpha);
             }
 
@@ -676,39 +850,51 @@ export function installRendererInterfaceEffects(Renderer) {
                 const p = particles[i];
                 if (p.isTrail || p.type !== 'ember') continue;
                 if (!shouldDrawParticleWithStride(i, p, stride)) continue;
-                if (p._onScreen === false) continue;
+                if (isOffscreen(p, p.size)) continue;
                 const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
                 this._drawEmberParticle(p, alpha);
             }
             ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = 1.0;
 
-            // Pass 4: physical debris/shards/chunks — always prioritized by stride helper
+            // Pass 4: physical debris/shards/chunks — priority types always drawn
             for (let i = 0; i < particleLimit; i++) {
                 const p = particles[i];
                 if (p.isTrail || p.type === 'aura' || p.type === 'ember' || p.type === 'spark') continue;
                 if (!shouldDrawParticleWithStride(i, p, stride)) continue;
-                if (p._onScreen === false) continue;
                 const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
                 const screenSize = p._screenSize !== undefined ? p._screenSize : (p.size * alpha);
-                if (p._onScreen === undefined) {
-                    if (p.x + screenSize < 0 || p.x - screenSize > this.width || p.y + screenSize < 0 || p.y - screenSize > this.height) continue;
+                if (isOffscreen(p, screenSize)) continue;
+                if (p.type === 'shard') {
+                    this._drawShardParticle(p, alpha, screenSize);
+                } else if (p.type === 'debris') {
+                    this._drawDebrisParticle(p, alpha, screenSize);
+                } else if (p.type === 'chunk') {
+                    this._drawChunkParticle(p, alpha, screenSize);
+                } else {
+                    this._drawPhysicalParticle(p, alpha, screenSize);
                 }
-                this._drawPhysicalParticle(p, alpha, screenSize);
             }
 
-            // Pass 5: sparks
+            // Pass 5: sparks — fillStyle cached for cheap pixel path
+            let sparkFill = null;
             for (let i = 0; i < particleLimit; i++) {
                 const p = particles[i];
                 if (p.isTrail || p.type !== 'spark') continue;
                 if (!shouldDrawParticleWithStride(i, p, stride)) continue;
-                if (p._onScreen === false) continue;
                 const alpha = p._drawAlpha !== undefined ? p._drawAlpha : (p.life / p.maxLife);
                 const screenSize = p._screenSize !== undefined ? p._screenSize : (p.size * alpha);
-                if (p._onScreen === undefined) {
-                    if (p.x + screenSize < 0 || p.x - screenSize > this.width || p.y + screenSize < 0 || p.y - screenSize > this.height) continue;
+                if (isOffscreen(p, screenSize)) continue;
+                if (screenSize < PARTICLE_LOD.cheapSparkSize) {
+                    ctx.globalAlpha = alpha * 0.85;
+                    if (p.color !== sparkFill) {
+                        ctx.fillStyle = p.color;
+                        sparkFill = p.color;
+                    }
+                    ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+                } else {
+                    this._drawSparkParticle(p, alpha, screenSize);
                 }
-                this._drawSparkParticle(p, alpha, screenSize);
             }
 
             ctx.globalAlpha = 1.0;
@@ -720,11 +906,10 @@ export function installRendererInterfaceEffects(Renderer) {
         }
         ,
         drawTrailParticle(p) {
-            this.ctx.globalAlpha = p.life;
-            this.ctx.fillStyle = p.color;
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            this.ctx.fill();
+            const alpha = p._drawAlpha !== undefined ? p._drawAlpha : p.life;
+            this.ctx.globalCompositeOperation = 'lighter';
+            this._drawTrailParticle(p, alpha);
+            this.ctx.globalCompositeOperation = 'source-over';
             this.ctx.globalAlpha = 1.0;
         }
         ,
@@ -789,23 +974,32 @@ export function installRendererInterfaceEffects(Renderer) {
         drawDevMetricsOverlay(gameState, profile) {
             const m = gameState.perfMetrics;
             const overrides = gameState.adaptiveOverrides;
+            const postFlags = [
+                profile.bloom ? 'B' : '',
+                profile.lightShafts ? 'S' : '',
+                profile.postFX ? 'F' : '',
+                profile.fog ? 'G' : ''
+            ].filter(Boolean).join('+') || 'none';
             const lines = [
                 'DEV PERF',
-                `FPS ${Math.round(m.smoothedFps || m.fps || 0)} (${m.fps || 0} raw)`,
-                `Frame ${(m.smoothedFrameMs || 0).toFixed(1)}ms`,
+                `FPS ${Math.round(m.smoothedFps || m.fps || 0)} (${m.fps || 0} raw · ${(m.instantFps || 0).toFixed(0)} inst)`,
+                `Frame ${(m.smoothedFrameMs || 0).toFixed(1)}ms (${(m.frameMs || 0).toFixed(1)} inst)`,
                 `Particles ${m.particleCount}/${m.particleLimit} stride ${m.particleStride}`,
-                `Env ${m.envParticleCount}/${profile.maxEnvParticles || 0}`,
+                `Trails ${m.trailCount || 0} · Spores ${m.sporeCount || 0}`,
+                `Env ${m.envParticleCount}/${profile.maxEnvParticles || 0} · Rings ${m.energyRingCount || 0}`,
                 `Shockwaves ${m.shockwaveCount}`,
                 `Quality ${gameState.renderQuality.toUpperCase()} · ${gameState.qualityMode.toUpperCase()}`,
-                `timeScale ${(gameState.timeScale || 1).toFixed(2)}`,
-                `critical ${(gameState.criticalIntensity || 0).toFixed(2)}`,
+                `Post [${postFlags}] bloom×${((profile.bloomStrength || 0) * (overrides.effectScale || 1)).toFixed(2)}`,
+                `timeScale ${(gameState.timeScale || 1).toFixed(2)} · critical ${(gameState.criticalIntensity || 0).toFixed(2)}`,
                 `adapt stride+${(overrides.particleStrideBoost || 0).toFixed(1)} fx ${(overrides.effectScale || 1).toFixed(2)}`,
-                `draw ${(m.particleDrawMs || 0).toFixed(2)}ms`
+                `update ${(m.particleUpdateMs || 0).toFixed(2)}ms · draw ${(m.particleDrawMs || 0).toFixed(2)}ms`,
+                `distort ${(m.distortionPrecomputeMs || 0).toFixed(2)}ms · cells ${m.distortionGridCells || 0}`,
+                '[P] toggle · __toggleDevPerf__()'
             ];
 
             const pad = 8;
             const lineHeight = 13;
-            const boxW = 248;
+            const boxW = 268;
             const boxH = pad * 2 + lines.length * lineHeight;
 
             this.ctx.save();

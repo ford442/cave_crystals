@@ -1,4 +1,4 @@
-import { COLORS, FILM_GRAIN_REFRESH_INTERVAL_MS, MAX_BLOOM_PARTICLES } from './RendererConstants.js';
+import { COLORS, GAME_CONFIG, FILM_GRAIN_REFRESH_INTERVAL_MS, FILM_GRAIN_HIGH_REFRESH_INTERVAL_MS, MAX_BLOOM_PARTICLES } from './RendererConstants.js';
 
 export function installRendererPostEffects(Renderer) {
     Object.assign(Renderer.prototype, {
@@ -213,38 +213,117 @@ export function installRendererPostEffects(Renderer) {
             this.ctx.fillStyle = this._fogGradient;
             this.ctx.fillRect(0, 0, this.width, this.height);
         
-            const pulse = 0.04 + Math.sin(timestamp / 1600) * 0.02;
+            const danger = gameState.criticalIntensity || 0;
+            const combo = gameState.combo || 0;
+            const comboT = combo > 2 ? Math.min(1, (combo - 2) / 10) : 0;
+            const pulse = 0.04 + Math.sin(timestamp / 1600) * 0.02 + comboT * 0.012;
             this.ctx.globalAlpha = Math.max(0.02, pulse);
             this.ctx.globalCompositeOperation = 'screen';
+        
+            if (!this._fogSweepGrad) {
+                this._fogSweepGrad = this.ctx.createLinearGradient(-120, 0, 120, this.height);
+                this._fogSweepGrad.addColorStop(0, 'rgba(255,255,255,0)');
+                this._fogSweepGrad.addColorStop(0.5, 'rgba(170,220,255,0.32)');
+                this._fogSweepGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            }
+        
             const sweeps = profile.crystalDetail === 'high' ? 3 : 1;
             for (let i = 0; i < sweeps; i++) {
                 const x = ((timestamp * 0.01) + (i * this.width * 0.35)) % (this.width + 240) - 120;
-                const grad = this.ctx.createLinearGradient(x, 0, x + 160, this.height);
-                grad.addColorStop(0, 'rgba(255,255,255,0)');
-                grad.addColorStop(0.5, 'rgba(170,220,255,0.32)');
-                grad.addColorStop(1, 'rgba(255,255,255,0)');
-                this.ctx.fillStyle = grad;
-                this.ctx.fillRect(x - 120, 0, 240, this.height);
+                this.ctx.save();
+                this.ctx.translate(x, 0);
+                this.ctx.fillStyle = this._fogSweepGrad;
+                this.ctx.fillRect(-120, 0, 240, this.height);
+                this.ctx.restore();
             }
+        
+            // Danger warmth bleeds into fog; combo adds faint golden lift that reads with bloom
+            if (danger > 0.05) {
+                this.ctx.globalCompositeOperation = 'overlay';
+                this.ctx.globalAlpha = danger * 0.06;
+                this.ctx.fillStyle = 'rgba(255, 40, 10, 1)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+            }
+            if (comboT > 0) {
+                const shimmer = 0.5 + 0.5 * Math.sin(timestamp / 900);
+                this.ctx.globalCompositeOperation = 'screen';
+                this.ctx.globalAlpha = comboT * 0.028 * shimmer;
+                this.ctx.fillStyle = 'rgba(255, 200, 80, 1)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+            }
+        
             this.ctx.globalAlpha = prevAlpha;
             this.ctx.globalCompositeOperation = prevComposite;
             this.ctx.fillStyle = prevFillStyle;
         }
         ,
-        drawLightShafts(gameState, launcher, timestamp = 0) {
+        _getShaftColorGradient(r, g, b, shaftH) {
+            if (this._shaftGradCacheH !== shaftH) {
+                this._shaftGradCache.clear();
+                this._shaftGradCacheH = shaftH;
+            }
+            const key = `${r >> 4}-${g >> 4}-${b >> 4}`;
+            let grad = this._shaftGradCache.get(key);
+            if (!grad) {
+                grad = this.ctx.createLinearGradient(0, 0, 0, shaftH);
+                grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.45)`);
+                grad.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, 0.18)`);
+                grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                this._shaftGradCache.set(key, grad);
+            }
+            return grad;
+        }
+        ,
+        _ensureShaftDustMotes() {
+            if (this._shaftDustMotes) return;
+            this._shaftDustMotes = [];
+            for (let i = 0; i < 14; i++) {
+                this._shaftDustMotes.push({
+                    nx: 0.12 + (i * 0.063) % 0.76,
+                    ny: (i * 0.11 + 0.05) % 0.88,
+                    phase: i * 1.73,
+                    size: 0.55 + (i % 4) * 0.32,
+                    drift: 0.25 + (i % 5) * 0.12
+                });
+            }
+        }
+        ,
+        _drawShaftDustMotes(sx, topW, botW, shaftH, angOff, time, opacity, r, g, b) {
+            this._ensureShaftDustMotes();
+            const prevFill = this.ctx.fillStyle;
+            for (const m of this._shaftDustMotes) {
+                const ny = (m.ny + Math.sin(time * m.drift + m.phase) * 0.018) % 1;
+                const y = ny * shaftH;
+                const widthAtY = topW + (botW - topW) * ny;
+                const nx = m.nx + Math.sin(time * (m.drift * 1.4) + m.phase * 1.3) * 0.035;
+                const x = sx + (nx - 0.5) * 2 * widthAtY + angOff * ny;
+                const twinkle = 0.35 + 0.65 * Math.sin(time * 2.8 + m.phase);
+                this.ctx.globalAlpha = opacity * 0.22 * twinkle;
+                this.ctx.fillStyle = `rgba(${Math.min(255, r + 40)}, ${Math.min(255, g + 30)}, ${Math.min(255, b + 20)}, 1)`;
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, m.size, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+            this.ctx.fillStyle = prevFill;
+        }
+        ,
+        drawLightShafts(gameState, launcher, timestamp = 0, profile = {}) {
             const time = timestamp / 1000;
+            const danger = gameState.criticalIntensity || 0;
+            const combo = gameState.combo || 0;
+            const comboBoost = combo > 2 ? Math.min(1, (combo - 2) / 10) * 0.18 : 0;
+            const dangerWidth = 1 + danger * 0.22;
+            const dangerOpacity = 1 + danger * 0.35;
+            const shaftDust = profile.shaftDust === true;
+        
             this.ctx.save();
             this.ctx.globalCompositeOperation = 'screen';
         
-            // --- Collect shaft sources ---
             const sources = [];
-        
-            // Primary source: launcher target lane
             const lane = launcher ? launcher.targetLane : Math.floor(GAME_CONFIG.lanes / 2);
             const centerX = (lane * this.laneWidth) + (this.laneWidth / 2);
-            sources.push({ x: centerX, intensity: 0.13, r: 180, g: 255, b: 255 });
+            sources.push({ x: centerX, intensity: 0.13 + comboBoost, r: 180, g: 255, b: 255 });
         
-            // Crystal sources: brightest / tallest crystals add secondary shafts
             for (let i = 0; i < gameState.crystals.length && sources.length < 5; i++) {
                 const c = gameState.crystals[i];
                 if (c.flash < 0.05 && c.height < 90) continue;
@@ -255,7 +334,6 @@ export function installRendererPostEffects(Renderer) {
                 sources.push({ x: cx, intensity, r: rgb.r, g: rgb.g, b: rgb.b });
             }
         
-            // Explosion sources: active shockwaves near the top half add brief bright shafts
             if (gameState.shockwaves) {
                 for (let i = 0; i < gameState.shockwaves.length && sources.length < 7; i++) {
                     const sw = gameState.shockwaves[i];
@@ -264,44 +342,48 @@ export function installRendererPostEffects(Renderer) {
                 }
             }
         
-            // --- Draw shafts for each source ---
+            const shaftH = this.height * 0.68;
+        
             for (let si = 0; si < sources.length; si++) {
                 const { x, intensity, r, g, b } = sources[si];
+                const isPrimary = si === 0;
+                const critMod = isPrimary ? dangerWidth : 1;
+                const critAlpha = isPrimary ? dangerOpacity : 1;
         
                 for (let i = -1; i <= 1; i++) {
-                    // Animate shaft direction and width with per-shaft noise
                     const angleNoise = Math.sin(time * 0.65 + i * 1.3 + si) * 0.025;
-                    const widthMod = 1 + Math.sin(time * 1.05 + i * 0.85 + si * 0.7) * 0.14;
-                    const opacityPulse = intensity * (0.8 + Math.sin(time * 2.2 + i * 2.0 + si) * 0.2);
+                    const widthMod = (1 + Math.sin(time * 1.05 + i * 0.85 + si * 0.7) * 0.14) * critMod;
+                    const opacityPulse = intensity * critAlpha * (0.8 + Math.sin(time * 2.2 + i * 2.0 + si) * 0.2);
         
                     const sx = x + (i * this.laneWidth * 0.8);
                     const topW = 45 * widthMod;
                     const botW = 175 * widthMod;
-                    const shaftH = this.height * 0.68;
                     const angOff = angleNoise * shaftH * 0.35;
         
-                    const shaft = this.ctx.createLinearGradient(sx, 0, sx, shaftH);
-                    shaft.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.45)`);
-                    shaft.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, 0.18)`);
-                    shaft.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-        
-                    this.ctx.globalAlpha = opacityPulse;
-                    this.ctx.fillStyle = shaft;
+                    this.ctx.save();
                     this.ctx.beginPath();
                     this.ctx.moveTo(sx - topW, 0);
                     this.ctx.lineTo(sx + topW, 0);
                     this.ctx.lineTo(sx + botW + angOff, shaftH);
                     this.ctx.lineTo(sx - botW + angOff, shaftH);
                     this.ctx.closePath();
-                    this.ctx.fill();
+                    this.ctx.clip();
         
-                    // Dust motes in the beam: overlay grain texture inside the primary shaft only.
-                    // Limiting to si===0 avoids redundant fills for secondary crystal/explosion shafts.
-                    if (this._grainPattern && si === 0) {
-                        this.ctx.globalAlpha = opacityPulse * 0.08;
+                    this.ctx.globalAlpha = opacityPulse;
+                    this.ctx.fillStyle = this._getShaftColorGradient(r, g, b, shaftH);
+                    this.ctx.fillRect(sx - botW - 20, 0, (botW + topW) * 2 + 40, shaftH);
+        
+                    if (this._grainPattern && isPrimary) {
+                        this.ctx.globalAlpha = opacityPulse * (0.08 + danger * 0.04);
                         this.ctx.fillStyle = this._grainPattern;
-                        this.ctx.fill();
+                        this.ctx.fillRect(sx - botW - 20, 0, (botW + topW) * 2 + 40, shaftH);
                     }
+        
+                    if (shaftDust && isPrimary && i === 0) {
+                        this._drawShaftDustMotes(sx, topW, botW, shaftH, angOff, time, opacityPulse, r, g, b);
+                    }
+        
+                    this.ctx.restore();
                 }
             }
         
@@ -309,20 +391,27 @@ export function installRendererPostEffects(Renderer) {
             this.ctx.restore();
         }
         ,
-        drawFilmGrain(timestamp, grainAmount = 1.0) {
+        drawFilmGrain(timestamp, grainAmount = 1.0, options = {}) {
             if (grainAmount <= 0) return;
-            if (!this._lastGrainRefresh || timestamp - this._lastGrainRefresh > FILM_GRAIN_REFRESH_INTERVAL_MS) {
+            const highQuality = options.highQuality === true;
+            const comboPulse = options.comboPulse || 0;
+            const refreshMs = highQuality ? FILM_GRAIN_HIGH_REFRESH_INTERVAL_MS : FILM_GRAIN_REFRESH_INTERVAL_MS;
+            const comboAlphaBoost = 1 + comboPulse * 0.18 * (0.6 + 0.4 * Math.sin(timestamp / 220));
+        
+            if (!this._lastGrainRefresh || timestamp - this._lastGrainRefresh > refreshMs) {
                 const size = 256;
                 const img = this._grainCtx.createImageData(size, size);
                 for (let i = 0; i < img.data.length; i += 4) {
-                    // Multi-octave noise: coarse grain + fine grain for realistic film texture
                     const coarse = Math.random() * 28;
                     const fine = Math.random() * 14;
-                    const v = Math.floor(coarse * 0.65 + fine * 0.35);
+                    const micro = highQuality ? Math.random() * 8 : 0;
+                    const v = Math.floor(coarse * (highQuality ? 0.52 : 0.65) + fine * (highQuality ? 0.32 : 0.35) + micro * 0.16);
                     img.data[i] = v;
                     img.data[i + 1] = v;
                     img.data[i + 2] = v;
-                    img.data[i + 3] = Math.floor(16 + Math.random() * 10);
+                    const alphaBase = highQuality ? 18 : 16;
+                    const alphaRange = highQuality ? 14 : 10;
+                    img.data[i + 3] = Math.floor(alphaBase + Math.random() * alphaRange);
                 }
                 this._grainCtx.putImageData(img, 0, 0);
                 this._grainPattern = this.ctx.createPattern(this._grainCanvas, 'repeat');
@@ -333,14 +422,17 @@ export function installRendererPostEffects(Renderer) {
             const prevAlpha = this.ctx.globalAlpha;
             const prevFillStyle = this.ctx.fillStyle;
             this.ctx.fillStyle = this._grainPattern;
-            // First pass: overlay for mid-tone grain texture
             this.ctx.globalCompositeOperation = 'overlay';
-            this.ctx.globalAlpha = 0.11 * grainAmount;
+            this.ctx.globalAlpha = 0.11 * grainAmount * comboAlphaBoost * (highQuality ? 1.08 : 1.0);
             this.ctx.fillRect(0, 0, this.width, this.height);
-            // Second pass: screen for bright grain "sparkle"
             this.ctx.globalCompositeOperation = 'screen';
-            this.ctx.globalAlpha = 0.04 * grainAmount;
+            this.ctx.globalAlpha = (highQuality ? 0.052 : 0.04) * grainAmount * comboAlphaBoost;
             this.ctx.fillRect(0, 0, this.width, this.height);
+            if (highQuality) {
+                this.ctx.globalCompositeOperation = 'soft-light';
+                this.ctx.globalAlpha = 0.028 * grainAmount * comboAlphaBoost;
+                this.ctx.fillRect(0, 0, this.width, this.height);
+            }
             this.ctx.globalCompositeOperation = prevComposite;
             this.ctx.globalAlpha = prevAlpha;
             this.ctx.fillStyle = prevFillStyle;
@@ -458,10 +550,13 @@ export function installRendererPostEffects(Renderer) {
             const prevOp = this.ctx.globalCompositeOperation;
             const prevAlpha = this.ctx.globalAlpha;
             const prevFill = this.ctx.fillStyle;
+            const danger = gameState.criticalIntensity || 0;
+            const combo = gameState.combo || 0;
+            const comboT = combo > 2 ? Math.min(1, (combo - 2) / 8) : 0;
+            const bloomSynergy = gameState.impactFlash > 0.1 ? gameState.impactFlash * 0.5 : 0;
         
-            // Base atmospheric grade: subtle cool-blue tint reinforces cave feel
             this.ctx.globalCompositeOperation = 'multiply';
-            this.ctx.globalAlpha = 0.045;
+            this.ctx.globalAlpha = 0.045 + comboT * 0.012;
             if (!this._colorGradeBaseGrad || this._colorGradeBaseGradH !== this.height) {
                 this._colorGradeBaseGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
                 this._colorGradeBaseGrad.addColorStop(0, 'rgba(150, 190, 255, 1)');
@@ -471,34 +566,47 @@ export function installRendererPostEffects(Renderer) {
             this.ctx.fillStyle = this._colorGradeBaseGrad;
             this.ctx.fillRect(0, 0, this.width, this.height);
         
-            // Danger grade: warm orange-red tint, grows with criticalIntensity
-            const danger = gameState.criticalIntensity || 0;
             if (danger > 0) {
                 this.ctx.globalCompositeOperation = 'overlay';
-                this.ctx.globalAlpha = danger * 0.10;
+                this.ctx.globalAlpha = danger * 0.12;
                 this.ctx.fillStyle = 'rgba(255, 55, 0, 1)';
                 this.ctx.fillRect(0, 0, this.width, this.height);
-                // Lift blacks slightly for "blown-out" look at high danger
                 this.ctx.globalCompositeOperation = 'screen';
-                this.ctx.globalAlpha = danger * 0.04;
+                this.ctx.globalAlpha = danger * 0.05;
                 this.ctx.fillStyle = 'rgba(80, 10, 0, 1)';
                 this.ctx.fillRect(0, 0, this.width, this.height);
+                if (danger > 0.25) {
+                    const bleedPulse = 0.7 + 0.3 * Math.sin(time * 3.2);
+                    this.ctx.globalCompositeOperation = 'soft-light';
+                    this.ctx.globalAlpha = (danger - 0.25) * 0.08 * bleedPulse;
+                    this.ctx.fillStyle = 'rgba(255, 90, 30, 1)';
+                    this.ctx.fillRect(0, 0, this.width, this.height);
+                }
             }
         
-            // Combo grade: warm golden shimmer at high combo
-            const combo = gameState.combo || 0;
-            if (combo > 2) {
-                const comboT = Math.min(1, (combo - 2) / 8);
+            if (comboT > 0) {
                 const shimmer = 0.5 + 0.5 * Math.sin(time * 3.5);
                 this.ctx.globalCompositeOperation = 'screen';
-                this.ctx.globalAlpha = comboT * 0.055 * shimmer;
+                this.ctx.globalAlpha = comboT * 0.068 * shimmer;
                 if (!this._colorGradeComboGrad || this._colorGradeComboGradW !== this.width) {
                     this._colorGradeComboGrad = this.ctx.createLinearGradient(0, 0, this.width, this.height);
                     this._colorGradeComboGrad.addColorStop(0, 'rgba(255, 210, 60, 1)');
+                    this._colorGradeComboGrad.addColorStop(0.5, 'rgba(255, 175, 50, 1)');
                     this._colorGradeComboGrad.addColorStop(1, 'rgba(255, 130, 30, 1)');
                     this._colorGradeComboGradW = this.width;
                 }
                 this.ctx.fillStyle = this._colorGradeComboGrad;
+                this.ctx.fillRect(0, 0, this.width, this.height);
+                this.ctx.globalCompositeOperation = 'color-dodge';
+                this.ctx.globalAlpha = comboT * 0.022 * (0.5 + 0.5 * Math.sin(time * 5.5));
+                this.ctx.fillStyle = 'rgba(255, 240, 180, 1)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+            }
+        
+            if (bloomSynergy > 0) {
+                this.ctx.globalCompositeOperation = 'screen';
+                this.ctx.globalAlpha = bloomSynergy * 0.12;
+                this.ctx.fillStyle = gameState.impactFlashColor || '#ffffff';
                 this.ctx.fillRect(0, 0, this.width, this.height);
             }
         
@@ -507,8 +615,7 @@ export function installRendererPostEffects(Renderer) {
             this.ctx.fillStyle = prevFill;
         }
         ,
-        _drawBaseVignette() {
-            // Subtle permanent dark vignette for cinematic framing
+        _drawBaseVignette(comboPulse = 0) {
             if (!this._baseVignetteGradient) {
                 const radius = Math.max(this.width, this.height);
                 this._baseVignetteGradient = this.ctx.createRadialGradient(
@@ -520,9 +627,16 @@ export function installRendererPostEffects(Renderer) {
             }
             const prevAlpha = this.ctx.globalAlpha;
             const prevFill = this.ctx.fillStyle;
-            this.ctx.globalAlpha = 1.0;
+            this.ctx.globalAlpha = 1.0 - comboPulse * 0.04;
             this.ctx.fillStyle = this._baseVignetteGradient;
             this.ctx.fillRect(0, 0, this.width, this.height);
+            if (comboPulse > 0.1) {
+                this.ctx.globalCompositeOperation = 'screen';
+                this.ctx.globalAlpha = comboPulse * 0.035;
+                this.ctx.fillStyle = 'rgba(255, 200, 120, 1)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+                this.ctx.globalCompositeOperation = 'source-over';
+            }
             this.ctx.globalAlpha = prevAlpha;
             this.ctx.fillStyle = prevFill;
         }
@@ -530,29 +644,28 @@ export function installRendererPostEffects(Renderer) {
         drawFilmPass(gameState, timestamp, profile) {
             const effectScale = gameState.adaptiveOverrides?.effectScale ?? 1.0;
             const grainAmount = (profile.grainAmount || 0) * effectScale;
+            const combo = gameState.combo || 0;
+            const comboPulse = combo > 2 ? Math.min(1, (combo - 2) / 10) : 0;
         
-            // 1. Permanent base vignette for cinematic framing
-            this._drawBaseVignette();
+            this._drawBaseVignette(profile.grainHighQuality ? comboPulse : 0);
         
-            // 2. Critical danger vignette (pulsing red)
             if (gameState.criticalIntensity > 0.01) {
                 this.drawVignette(gameState.criticalIntensity, timestamp);
             }
         
-            // 3. Scanlines — subtly always present; more pronounced during critical.
-            // Base intensity is set per quality profile (scanlineBase) for independent tuning.
             const scanlineBase = profile.scanlineBase || 0;
             const scanlineIntensity = Math.min(1.0, scanlineBase + (gameState.criticalIntensity || 0) * 0.28);
             this.drawScanlines(scanlineIntensity);
         
-            // 4. Glitch — only during high danger
             if ((gameState.criticalIntensity || 0) > 0.2) {
                 this.drawGlitch(gameState.criticalIntensity);
             }
         
-            // 5. Multi-octave film grain
             if (grainAmount > 0) {
-                this.drawFilmGrain(timestamp, grainAmount);
+                this.drawFilmGrain(timestamp, grainAmount, {
+                    highQuality: profile.grainHighQuality === true,
+                    comboPulse
+                });
             }
         }
         

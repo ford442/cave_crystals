@@ -191,12 +191,16 @@ export function installGameRuntime(Game) {
         }
         ,
         updateSharedVisuals(dt, timeScale = 1.0) {
+            const trackMs = this.state.devPerfOverlay;
+            const updateT0 = trackMs ? performance.now() : 0;
             const particles = this.state.particles;
             const rw = this.renderer.width;
             const rh = this.renderer.height;
             const onBounce = this._boundCreateImpactDust;
             const ambientBatch = this._ambientBatch;
+            const trailBatch = this._trailUpdateBatch;
             let ambientCount = 0;
+            let trailCount = 0;
 
             const removeParticleAt = (i) => {
                 const p = particles[i];
@@ -209,7 +213,7 @@ export function installGameRuntime(Game) {
                 particles.pop();
             };
 
-            // Update Particles — ambient types batched separately for WASM/JS fast path
+            // Update Particles — ambient + trail types batched for WASM/JS fast paths
             for (let i = particles.length - 1; i >= 0; i--) {
                 const p = particles[i];
 
@@ -219,10 +223,11 @@ export function installGameRuntime(Game) {
                 }
 
                 if (p.isTrail) {
-                    p.update(timeScale, rw, rh);
-                } else {
-                    p.update(rw, rh, onBounce, timeScale);
+                    if (trailCount < trailBatch.length) trailBatch[trailCount++] = p;
+                    continue;
                 }
+
+                p.update(rw, rh, onBounce, timeScale);
 
                 // JUICE: Chunk Shatter Logic
                 if (p.type === 'chunk' && (p.hitFloor || p.hitWall)) {
@@ -236,6 +241,22 @@ export function installGameRuntime(Game) {
 
                 if (p.life <= 0) {
                     removeParticleAt(i);
+                }
+            }
+
+            if (trailCount > 0) {
+                const usedWasm = wasmManager.batchIntegrateTrailParticles(
+                    trailBatch, trailCount, timeScale, rw, rh
+                );
+                if (!usedWasm) {
+                    for (let j = 0; j < trailCount; j++) {
+                        trailBatch[j].update(timeScale, rw, rh);
+                    }
+                }
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    if (particles[i].isTrail && particles[i].life <= 0) {
+                        removeParticleAt(i);
+                    }
                 }
             }
 
@@ -310,6 +331,10 @@ export function installGameRuntime(Game) {
             this.state.dustParticles.forEach(p => {
                 p.update(this.renderer.width, this.renderer.height, timeScale);
             });
+
+            if (trackMs && this.state.perfMetrics) {
+                this.state.perfMetrics.particleUpdateMs = performance.now() - updateT0;
+            }
         
             // Update Environmental Particles (cave drips, motes, rock dust)
             const profile = this.renderer.getQualityProfile(this.state.renderQuality);
@@ -513,6 +538,7 @@ export function installGameRuntime(Game) {
                 this.state.sleepTimer = 30; // Small hit stop for errors too
                 if (x !== undefined && y !== undefined) {
                     this.createFloatingText(x, y, "MISS", '#f00');
+                    this.createImpactSparks(x, y, '#888', 2);
                 }
             }
         }
@@ -532,7 +558,10 @@ export function installGameRuntime(Game) {
         setQualityMode(mode = 'auto') {
             const prevQuality = this.state.renderQuality;
             this.state.qualityMode = mode;
-            if (mode === 'auto') {
+            if (mode === 'dev') {
+                this.state.renderQuality = 'high';
+                this.state.devPerfOverlay = true;
+            } else if (mode === 'auto') {
                 if (!this._smoothedFps) this._smoothedFps = 60;
                 this.state.renderQuality = this.resolveQualityForFps(
                     this._smoothedFps,
@@ -545,6 +574,7 @@ export function installGameRuntime(Game) {
             if (prevQuality !== this.state.renderQuality) {
                 this.resetAdaptiveOverrides();
             }
+            this._updateFpsHud();
         }
         ,
         resetAdaptiveOverrides() {
@@ -576,6 +606,7 @@ export function installGameRuntime(Game) {
         updatePerfMetrics(dt, fps) {
             const metrics = this.state.perfMetrics;
             metrics.frameMs = dt;
+            metrics.instantFps = dt > 0 ? 1000 / dt : 0;
             if (!metrics.smoothedFrameMs) metrics.smoothedFrameMs = dt;
             metrics.smoothedFrameMs += (dt - metrics.smoothedFrameMs) * 0.18;
             if (fps !== undefined) {
@@ -587,12 +618,26 @@ export function installGameRuntime(Game) {
             metrics.particleLimit = profile.maxParticles;
             metrics.envParticleCount = this.state.envParticles.length;
             metrics.shockwaveCount = this.state.shockwaves.length;
+            metrics.sporeCount = this.state.spores.length;
+            metrics.energyRingCount = this.state.energyRings.length;
             metrics.particleStride = resolveParticleStride(
                 profile,
                 metrics.particleCount,
                 this.state.adaptiveOverrides,
-                metrics.smoothedFrameMs
+                metrics.smoothedFrameMs,
+                metrics.instantFps > 0 ? 1000 / metrics.instantFps : metrics.smoothedFrameMs
             );
+
+            // JUICE: Dev-only extended metrics — zero extra work when overlay is off
+            if (this.state.devPerfOverlay) {
+                let trails = 0;
+                const particles = this.state.particles;
+                for (let i = 0; i < particles.length; i++) {
+                    if (particles[i].isTrail) trails++;
+                }
+                metrics.trailCount = trails;
+                this._updateFpsHud();
+            }
         }
         ,
         updateFrameTimeAdaptive() {
@@ -647,8 +692,7 @@ export function installGameRuntime(Game) {
                 this.updateAdaptiveQuality(fps);
                 this.updatePerfMetrics(dt, fps);
                 if (this.ui.fps) {
-                    const qualityLabel = this.state.renderQuality.toUpperCase() + (this.state.qualityMode === 'auto' ? ' AUTO' : '');
-                    this.ui.fps.textContent = `${fps} FPS · ${qualityLabel}`;
+                    this._updateFpsHud();
                 }
                 this._fpsFrames = 0;
                 this._fpsLastTime = timestamp;
@@ -708,9 +752,13 @@ export function installGameRuntime(Game) {
                 this.createShockwave(x, y, color);
                 // Layer 4: Energy ring for extra pop
                 this.state.energyRings.push(new EnergyRing(x, y, color, 4));
+                const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+                if (profile.crystalDetail !== 'low') {
+                    this.state.energyRings.push(new EnergyRing(x, y, color, 1, { flash: true }));
+                    this.createImpactSparks(x, y, color, 5);
+                }
                 // Layer 5: Amber-specific ember trails
                 if (crystalName === 'Amber') {
-                    const profile = this.renderer.getQualityProfile(this.state.renderQuality);
                     const emberCount = profile.crystalDetail === 'high' ? 8 : 4;
                     for (let j = 0; j < emberCount; j++) {
                         if (this.state.particles.length < profile.maxParticles) {

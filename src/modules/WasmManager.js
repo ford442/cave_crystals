@@ -357,6 +357,65 @@ export class WasmManager {
             return false;
         }
     }
+
+    /**
+     * Batch-integrate trail particles via WASM linear memory.
+     * Returns false when WASM is unavailable or batch is too small — caller runs JS fallback.
+     */
+    batchIntegrateTrailParticles(trailParticles, count, timeScale, rendererWidth, rendererHeight) {
+        const MIN_BATCH = 24;
+        if (!this.ready || !this.exports.batchIntegrateTrailParticles || count < MIN_BATCH) {
+            return false;
+        }
+
+        try {
+            const memory = this.instance.exports.memory;
+            const byteOffset = this.exports.getTrailBatchByteOffset();
+            const stride = this.exports.getTrailBatchStride();
+            const maxBatch = Math.floor(this.exports.getTrailBatchFloatCount() / stride);
+            const batchCount = Math.min(count, maxBatch);
+            const view = new Float64Array(memory.buffer, byteOffset, stride * batchCount);
+
+            for (let j = 0; j < batchCount; j++) {
+                const p = trailParticles[j];
+                const base = j * stride;
+                view[base] = p.x;
+                view[base + 1] = p.y;
+                view[base + 2] = p.vx;
+                view[base + 3] = p.vy;
+                view[base + 4] = p.life;
+                view[base + 5] = p.size;
+            }
+
+            this.exports.batchIntegrateTrailParticles(batchCount, timeScale);
+
+            for (let j = 0; j < batchCount; j++) {
+                const p = trailParticles[j];
+                const base = j * stride;
+                p.x = view[base];
+                p.y = view[base + 1];
+                p.vx = view[base + 2];
+                p.vy = view[base + 3];
+                p.life = view[base + 4];
+                p.size = view[base + 5];
+                p._drawAlpha = p.life;
+                p._screenSize = p.size;
+                const s = p.size;
+                p._onScreen = p.x + s >= 0 && p.x - s <= rendererWidth
+                    && p.y + s >= 0 && p.y - s <= rendererHeight;
+            }
+
+            if (batchCount < count) {
+                for (let j = batchCount; j < count; j++) {
+                    trailParticles[j].update(timeScale, rendererWidth, rendererHeight);
+                }
+            }
+            return true;
+        } catch (error) {
+            console.warn('WASM trail particle batch failed, falling back:', error);
+            return false;
+        }
+    }
 }
 
 // Create and export a singleton instance

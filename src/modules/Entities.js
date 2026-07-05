@@ -44,6 +44,8 @@ export class Crystal {
             Math.random() * Math.PI * 2,
             Math.random() * Math.PI * 2
         ];
+        // Modulates internal facet lattice density (renderer reads on high detail only)
+        this.facetDensity = 0.55 + Math.random() * 0.45;
 
         // Micro-jitter state for critical feel
         this.jitterX = 0;
@@ -339,6 +341,7 @@ export class Particle {
             this.gravity = 0.12;
             this.friction = 0.97;
             this.floorBounce = false;
+            this.emberHeat = 0.45 + Math.random() * 0.55;
         } else {
             this.gravity = type === 'debris' ? 0.6 : 0.4;
             this.friction = type === 'debris' ? 0.95 : 0.98;
@@ -348,10 +351,10 @@ export class Particle {
         if (type === 'debris') {
             if (!this.polyPoints) this.polyPoints = [];
             else this.polyPoints.length = 0;
-            const numPoints = 3 + Math.floor(Math.random() * 3); // 3 to 5
-            for(let i=0; i<numPoints; i++) {
-                const angle = (i / numPoints) * Math.PI * 2;
-                const r = this.size * (0.6 + Math.random() * 0.4);
+            const numPoints = 4 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < numPoints; i++) {
+                const angle = (i / numPoints) * Math.PI * 2 + (Math.random() - 0.5) * 0.55;
+                const r = this.size * (0.45 + Math.random() * 0.55);
                 this.polyPoints.push({
                     x: Math.cos(angle) * r,
                     y: Math.sin(angle) * r
@@ -360,13 +363,13 @@ export class Particle {
         } else if (type === 'shard') {
             if (!this.polyPoints) this.polyPoints = [];
             else this.polyPoints.length = 0;
-            // Create a jagged shard (elongated triangle)
-            // Tip
-            this.polyPoints.push({ x: 0, y: -this.size });
-            // Right base
-            this.polyPoints.push({ x: this.size * 0.3, y: this.size });
-            // Left base
-            this.polyPoints.push({ x: -this.size * 0.3, y: this.size });
+            // JUICE: Thin elongated crystal splinter — reads distinct from chunky debris
+            const len = this.size;
+            this.polyPoints.push({ x: 0, y: -len });
+            this.polyPoints.push({ x: len * 0.1, y: -len * 0.15 });
+            this.polyPoints.push({ x: len * 0.16, y: len * 0.9 });
+            this.polyPoints.push({ x: -len * 0.16, y: len * 0.9 });
+            this.polyPoints.push({ x: -len * 0.1, y: -len * 0.15 });
         } else if (type === 'chunk') {
             if (!this.polyPoints) this.polyPoints = [];
             else this.polyPoints.length = 0;
@@ -489,20 +492,29 @@ export class TrailParticle {
         this._init(x, y, color);
     }
 
-    _init(x, y, color) {
+    _init(x, y, color, isEnergy = false) {
         this.x = x;
         this.y = y;
         this.color = color;
+        this.isEnergy = isEnergy;
         this.life = 1.0;
         this.maxLife = 1.0;
-        this.size = Math.random() * 4 + 2;
+        if (isEnergy) {
+            this.size = Math.random() * 3 + 3.5;
+            this.wispStretch = 1.5 + Math.random() * 0.9;
+            this.glowPhase = Math.random() * Math.PI * 2;
+        } else {
+            this.size = Math.random() * 4 + 2;
+            this.wispStretch = 1;
+            this.glowPhase = 0;
+        }
         this.rotation = Math.random() * Math.PI * 2;
         this.vx = (Math.random() - 0.5) * 0.5;
         this.vy = (Math.random() - 0.5) * 0.5;
     }
 
-    reset(x, y, color) {
-        this._init(x, y, color);
+    reset(x, y, color, isEnergy = false) {
+        this._init(x, y, color, isEnergy);
     }
 
     update(timeScale = 1.0, rendererWidth = 0, rendererHeight = 0) {
@@ -577,20 +589,29 @@ export class Shockwave {
 }
 
 export class EnergyRing {
-    constructor(x, y, color, comboLevel = 1) {
+    constructor(x, y, color, comboLevel = 1, options = {}) {
         this.x = x;
         this.y = y;
         this.color = color;
-        this.comboLevel = Math.min(comboLevel, 8);
-        this.radius = 5;
-        this.life = 1.0;
-        this.width = 5 + this.comboLevel * 0.8;
+        this.isFlash = options.flash === true;
+        this.comboLevel = this.isFlash ? 1 : Math.min(comboLevel, 8);
+        this.radius = this.isFlash ? 6 : 5;
+        this.life = this.isFlash ? 0.75 : 1.0;
+        this.maxLife = this.life;
+        this.width = this.isFlash ? 2.5 : (5 + this.comboLevel * 0.8);
     }
 
     update(timeScale = 1.0) {
+        const ts = Math.max(timeScale, 0.25);
+        if (this.isFlash) {
+            this.radius += 22 * timeScale;
+            this.life -= 0.13 * ts;
+            this.width = Math.max(0.5, this.width - 0.45 * timeScale);
+            return;
+        }
         const speed = 5 + this.comboLevel * 0.5;
         this.radius += speed * timeScale;
-        this.life -= 0.05 * Math.max(timeScale, 0.25);
+        this.life -= 0.05 * ts;
         this.width = Math.max(0, this.width - 0.25 * timeScale);
     }
 }

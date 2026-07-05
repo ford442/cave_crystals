@@ -32,6 +32,7 @@ export class Renderer {
         this._vignetteGradient = null;
         this._baseVignetteGradient = null;
         this._fogGradient = null;
+        this._fogSweepGrad = null;
         this._qualityProfiles = RENDER_QUALITY_PROFILES;
 
         // Film grain: upgraded to 256×256 for higher-quality multi-octave noise
@@ -47,11 +48,17 @@ export class Renderer {
         this._bloomCanvas.height = Math.max(4, Math.floor(canvas.height / 4));
         this._bloomCtx = this._bloomCanvas.getContext('2d');
         this._bloomGradCache = new Map();
+        this._shaftGradCache = new Map();
+        this._shaftGradCacheH = 0;
 
         // Cave environment geometry (seeded, regenerated on resize)
         this._caveGeometry = null;
         this._caveGeometryW = 0;
         this._caveGeometryH = 0;
+
+        // Per-frame shockwave distortion field (precomputed once per draw)
+        this._distortionField = null;
+        this._distortionLookupCount = 0;
     }
 
     resize(w, h) {
@@ -63,10 +70,13 @@ export class Renderer {
         this._vignetteGradient = null; // invalidate cached gradients
         this._baseVignetteGradient = null;
         this._fogGradient = null;
+        this._fogSweepGrad = null;
         // Resize bloom buffer to match new resolution
         this._bloomCanvas.width = Math.max(4, Math.floor(w / 4));
         this._bloomCanvas.height = Math.max(4, Math.floor(h / 4));
         this._bloomGradCache.clear();
+        this._shaftGradCache.clear();
+        this._shaftGradCacheH = 0;
         // Invalidate cave geometry so it regenerates at new resolution
         this._caveGeometry = null;
     }
@@ -113,6 +123,9 @@ export class Renderer {
 
         const particleCount = gameState.particles ? gameState.particles.length : 0;
         const isWarping = warpMagnitude > 3.0;
+
+        // Precompute shockwave distortion once per frame (crystals, launcher, grid)
+        this.prepareShockwaveDistortionField(gameState, profile, particleCount, launcher);
 
         // JUICE: Impact Zoom
         if (gameState.zoom && gameState.zoom > 1.0) {
@@ -162,49 +175,40 @@ export class Renderer {
         // Draw Crystals (skip chromatic aberration on crystals during explosions)
         for (let i = 0; i < gameState.crystals.length; i++) {
             const c = gameState.crystals[i];
-             // JUICE: Apply Shockwave Distortion
-             // Calculate center of crystal
-             const cX = (c.lane * this.laneWidth) + (this.laneWidth / 2);
-             const cY = c.type === 'top' ? c.height / 2 : this.height - (c.height / 2);
-             const distortion = this.calculateShockwaveDistortion(cX, cY, gameState);
-
-             if (distortion.x !== 0 || distortion.y !== 0) {
-                 this.ctx.save();
-                 this.ctx.translate(distortion.x, distortion.y);
-             }
-
-             // Only apply chromatic aberration to launcher, not crystals
-             this.drawComplexCrystal(c, null, particleCount, profile, timestamp, launcher, gameState.spores);
-             if (distortion.x !== 0 || distortion.y !== 0) {
-                 this.ctx.restore();
-             }
+            const distortion = this.getCrystalDistortion(i);
+            this.drawComplexCrystal(
+                c, null, particleCount, profile, timestamp, launcher, gameState.spores,
+                distortion.x, distortion.y
+            );
         }
 
         // Draw Launcher with Chromatic Aberration (Motion Blur)
         if (launcher) {
-            // JUICE: Apply Shockwave Distortion
-            const distortion = this.calculateShockwaveDistortion(launcher.x, launcher.y, gameState);
-            this.ctx.save();
-            this.ctx.translate(distortion.x, distortion.y);
-
-            if (isWarping) {
-                this.ctx.globalCompositeOperation = 'screen';
-                // Red Channel
+            const distortion = this.getLauncherDistortion();
+            const hasDist = distortion.x !== 0 || distortion.y !== 0;
+            if (hasDist || isWarping) {
                 this.ctx.save();
-                this.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
-                this.drawCursor(gameState, launcher, 'red');
-                this.ctx.restore();
+                if (hasDist) this.ctx.translate(distortion.x, distortion.y);
 
-                // Blue Channel
-                this.ctx.save();
-                this.ctx.translate(4 + (warpMagnitude * 0.2), 0);
-                this.drawCursor(gameState, launcher, 'blue');
-                this.ctx.restore();
+                if (isWarping) {
+                    this.ctx.globalCompositeOperation = 'screen';
+                    this.ctx.save();
+                    this.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
+                    this.drawCursor(gameState, launcher, 'red');
+                    this.ctx.restore();
 
-                this.ctx.globalCompositeOperation = 'source-over';
+                    this.ctx.save();
+                    this.ctx.translate(4 + (warpMagnitude * 0.2), 0);
+                    this.drawCursor(gameState, launcher, 'blue');
+                    this.ctx.restore();
+
+                    this.ctx.globalCompositeOperation = 'source-over';
+                }
+                this.drawCursor(gameState, launcher);
+                this.ctx.restore();
+            } else {
+                this.drawCursor(gameState, launcher);
             }
-            this.drawCursor(gameState, launcher);
-            this.ctx.restore();
         }
         for (let i = 0; i < gameState.spores.length; i++) {
             this.drawSpore(gameState.spores[i], timestamp);
@@ -212,7 +216,10 @@ export class Renderer {
 
         const particleLimit = Math.min(profile.maxParticles, particleCount);
         const frameMs = gameState.perfMetrics ? gameState.perfMetrics.smoothedFrameMs : 16.7;
-        const stride = resolveParticleStride(profile, particleCount, gameState.adaptiveOverrides, frameMs);
+        const instantFrameMs = gameState.perfMetrics?.instantFps > 0
+            ? 1000 / gameState.perfMetrics.instantFps
+            : frameMs;
+        const stride = resolveParticleStride(profile, particleCount, gameState.adaptiveOverrides, frameMs, instantFrameMs);
         if (gameState.perfMetrics) {
             gameState.perfMetrics.particleStride = stride;
         }
@@ -252,6 +259,10 @@ export class Renderer {
 
         this.ctx.restore();
 
+        if (gameState.devPerfOverlay && gameState.perfMetrics) {
+            gameState.perfMetrics.distortionLookupCount = this._distortionLookupCount || 0;
+        }
+
         // --- Cinematic Post-Processing Stack ---
 
         // 1. Bloom — bright elements bleed into fog and environment (high only)
@@ -261,7 +272,7 @@ export class Renderer {
 
         // 2. Enhanced light shafts (reactive to crystals and explosions)
         if (profile.lightShafts) {
-            this.drawLightShafts(gameState, launcher, timestamp);
+            this.drawLightShafts(gameState, launcher, timestamp, profile);
         }
 
         // 3. Dynamic color grading — contrast/saturation shift by danger and combo

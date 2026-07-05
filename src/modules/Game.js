@@ -71,7 +71,16 @@ export class Game {
                 particleLimit: 0,
                 particleStride: 1,
                 envParticleCount: 0,
-                shockwaveCount: 0
+                shockwaveCount: 0,
+                distortionPrecomputeMs: 0,
+                distortionGridCells: 0,
+                distortionLookupCount: 0,
+                instantFps: 60,
+                trailCount: 0,
+                energyRingCount: 0,
+                sporeCount: 0,
+                particleDrawMs: 0,
+                particleUpdateMs: 0
             },
             adaptiveOverrides: {
                 particleStrideBoost: 0,
@@ -113,6 +122,7 @@ export class Game {
         this._boundOnSporeScore = this._onSporeScore.bind(this);
 
         this._ambientBatch = new Array(512);
+        this._trailUpdateBatch = new Array(512);
 
         if (typeof window !== 'undefined' && window.__DEV_PERF__) {
             this.state.devPerfOverlay = true;
@@ -125,7 +135,22 @@ export class Game {
 
     toggleDevPerfOverlay(force) {
         this.state.devPerfOverlay = typeof force === 'boolean' ? force : !this.state.devPerfOverlay;
+        this._updateFpsHud();
         return this.state.devPerfOverlay;
+    }
+
+    _updateFpsHud() {
+        if (!this.ui.fps) return;
+        const m = this.state.perfMetrics;
+        const qualityLabel = this.state.renderQuality.toUpperCase()
+            + (this.state.qualityMode === 'auto' ? ' AUTO' : this.state.qualityMode === 'dev' ? ' DEV' : '');
+        if (this.state.devPerfOverlay) {
+            this.ui.fps.textContent = `${Math.round(m.smoothedFps || m.fps || 0)} FPS · ${m.particleCount}/${m.particleLimit} · ${qualityLabel}`;
+            this.ui.fps.classList.add('dev-active');
+        } else if (m.fps) {
+            this.ui.fps.textContent = `${m.fps} FPS · ${qualityLabel}`;
+            this.ui.fps.classList.remove('dev-active');
+        }
     }
 
     bindEvents() {
@@ -299,9 +324,19 @@ export class Game {
         // Energy ring (always) - scales with combo
         this.state.energyRings.push(new EnergyRing(x, y, color, combo));
 
+        // JUICE: Fast flash ring for instant impact pop (medium+)
+        if (profile.crystalDetail !== 'low') {
+            this.state.energyRings.push(new EnergyRing(x, y, color, 1, { flash: true }));
+        }
+
         // Second white ring on high combo
         if (combo > 3) {
             this.state.energyRings.push(new EnergyRing(x, y, '#ffffff', 1));
+        }
+
+        // JUICE: Color-matched spark burst — cheap, short-lived, reads on screenshots
+        if (profile.crystalDetail !== 'low') {
+            this.createImpactSparks(x, y, color, 3 + Math.min(combo, 6));
         }
 
         // Dissolving sparkle particles in a spiral pattern
@@ -323,6 +358,28 @@ export class Game {
                 const vy = Math.sin(angle) * speed;
                 this.state.particles.push(this.particlePool.acquire(x, y, COLORS[i].hex, vx, vy, 'aura'));
             }
+        }
+    }
+
+    createImpactSparks(x, y, color, count = 4) {
+        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
+        if (profile.crystalDetail === 'low') return;
+        const maxParticles = profile.maxParticles;
+        const scaled = Math.max(1, Math.floor(count * this.getQualityScale()));
+        for (let i = 0; i < scaled; i++) {
+            if (this.state.particles.length >= maxParticles) break;
+            const angle = (i / scaled) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+            const speed = 9 + Math.random() * 7;
+            const p = this.particlePool.acquire(
+                x, y, color,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                'spark'
+            );
+            p.maxLife = 0.32 + Math.random() * 0.12;
+            p.life = p.maxLife;
+            p.size = Math.random() * 2.2 + 1.2;
+            this.state.particles.push(p);
         }
     }
 
@@ -393,7 +450,12 @@ export class Game {
         if (count >= maxP) return;
         if (count > maxP * 0.85 && Math.random() > 0.4) return;
         if (count > maxP * 0.7 && Math.random() > 0.65) return;
-        this.state.particles.push(this.trailPool.acquire(x, y, color));
+        const frameMs = this.state.perfMetrics?.smoothedFrameMs ?? 16.7;
+        if (frameMs > 20 && Math.random() > 0.45) return;
+        if (count > maxP * 0.55 && Math.random() > 0.5) return;
+        // JUICE: Energy wisps on high — same pool, richer draw, no extra spawns
+        const isEnergy = profile.crystalDetail === 'high' && Math.random() < 0.6;
+        this.state.particles.push(this.trailPool.acquire(x, y, color, isEnergy));
     }
 
     createShockwave(x, y, color) {
