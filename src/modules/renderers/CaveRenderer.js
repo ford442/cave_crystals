@@ -1,7 +1,12 @@
-import { COLORS, CAVE_SEED_BASE, CAVE_SEED_WIDTH_FACTOR, CAVE_SEED_HEIGHT_FACTOR, CAVE_VEIN_COLORS } from './RendererConstants.js';
+import { COLORS, CAVE_SEED_BASE, CAVE_SEED_WIDTH_FACTOR, CAVE_SEED_HEIGHT_FACTOR, CAVE_VEIN_COLORS } from '../RendererConstants.js';
+/** @import { RendererHost } from './RendererHost.js' */
 
-export function installRendererCave(Renderer) {
-    Object.assign(Renderer.prototype, {
+export class CaveRenderer {
+    /** @param {RendererHost} host */
+    constructor(host) {
+        this.host = host;
+    }
+
         _initCaveGeometry(w, h) {
             let seed = ((CAVE_SEED_BASE + Math.floor(w) * CAVE_SEED_WIDTH_FACTOR + Math.floor(h) * CAVE_SEED_HEIGHT_FACTOR) | 0) >>> 0;
             const rand = () => {
@@ -76,19 +81,19 @@ export function installRendererCave(Renderer) {
         
             return { topStalactites, bottomStalactites, veins, bioPatches, dripSpawnPositions };
         }
-        ,
+
         drawCaveLayers(gameState, timestamp) {
-            const profile = this.getQualityProfile(gameState.renderQuality);
+            const profile = this.host.getQualityProfile(gameState.renderQuality);
             const caveDetail = profile.caveDetail || 'low';
-            const { width: w, height: h } = this;
+            const { width: w, height: h } = this.host;
         
-            if (!this._caveGeometry || this._caveGeometryW !== w || this._caveGeometryH !== h) {
-                this._caveGeometry = this._initCaveGeometry(w, h);
-                this._caveGeometryW = w;
-                this._caveGeometryH = h;
+            if (!this.host._caveGeometry || this.host._caveGeometryW !== w || this.host._caveGeometryH !== h) {
+                this.host._caveGeometry = this._initCaveGeometry(w, h);
+                this.host._caveGeometryW = w;
+                this.host._caveGeometryH = h;
             }
-            const geo = this._caveGeometry;
-            const ctx = this.ctx;
+            const geo = this.host._caveGeometry;
+            const ctx = this.host.ctx;
             const time = timestamp * 0.001;
         
             const shakeX = gameState.shakeOffset ? gameState.shakeOffset.x : 0;
@@ -113,7 +118,7 @@ export function installRendererCave(Renderer) {
             for (const vein of geo.veins) {
                 const pulse = 0.3 + 0.35 * Math.sin(time * vein.pulseSpeed + vein.phase) + dangerBoost * 0.3 + comboBoost * 0.15;
                 const alpha = Math.max(0, Math.min(1, pulse));
-                const rgb = this.hexToRgb(vein.color);
+                const rgb = this.host.hexToRgb(vein.color);
                 if (!rgb) continue;
                 ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
                 ctx.lineWidth = vein.width * (1 + pulse * 0.5);
@@ -141,7 +146,7 @@ export function installRendererCave(Renderer) {
                 const intensity = (0.10 + dangerBoost * 0.12 + comboBoost * 0.08) * pulse;
                 if (intensity < 0.01) continue;
                 const color = COLORS[patch.colorIdx];
-                const rgb = this.hexToRgb(color.hex);
+                const rgb = this.host.hexToRgb(color.hex);
                 if (!rgb) continue;
                 const grad = ctx.createRadialGradient(patch.x, patch.y, 0, patch.x, patch.y, patch.radius);
                 grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${intensity})`);
@@ -153,16 +158,16 @@ export function installRendererCave(Renderer) {
             }
             ctx.restore();
         }
-        ,
+
         drawCaveWallOverlays(gameState, timestamp) {
-            const profile = this.getQualityProfile(gameState.renderQuality);
+            const profile = this.host.getQualityProfile(gameState.renderQuality);
             const caveDetail = profile.caveDetail || 'low';
             if (caveDetail === 'low') return;
-            if (!this._caveGeometry) return;
+            if (!this.host._caveGeometry) return;
         
-            const geo = this._caveGeometry;
-            const ctx = this.ctx;
-            const { width: w, height: h } = this;
+            const geo = this.host._caveGeometry;
+            const ctx = this.host.ctx;
+            const { width: w, height: h } = this.host;
             const time = timestamp * 0.001;
             const dangerLevel = gameState.criticalIntensity || 0;
             const combo = gameState.combo || 0;
@@ -224,7 +229,7 @@ export function installRendererCave(Renderer) {
                     const pulse = 0.5 + 0.5 * Math.sin(time * 1.2 + st.x * 0.01);
                     const glowR = 8 + pulse * 10 + dangerLevel * 6;
                     const color = COLORS[st.colorIdx];
-                    const rgb = this.hexToRgb(color.hex);
+                    const rgb = this.host.hexToRgb(color.hex);
                     if (!rgb) continue;
                     const grad = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, glowR);
                     grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${0.55 + pulse * 0.3})`);
@@ -240,7 +245,7 @@ export function installRendererCave(Renderer) {
                     const pulse = 0.5 + 0.5 * Math.sin(time * 1.0 + st.x * 0.01 + 1.5);
                     const glowR = 8 + pulse * 10 + dangerLevel * 6;
                     const color = COLORS[st.colorIdx];
-                    const rgb = this.hexToRgb(color.hex);
+                    const rgb = this.host.hexToRgb(color.hex);
                     if (!rgb) continue;
                     const grad = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, glowR);
                     grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${0.55 + pulse * 0.3})`);
@@ -268,11 +273,11 @@ export function installRendererCave(Renderer) {
                 ctx.restore();
             }
         }
-        ,
+
         drawEnvironmentalParticles(particles, gameState, timestamp) {
             if (!particles || particles.length === 0) return;
-            const ctx = this.ctx;
-            const profile = this.getQualityProfile(gameState.renderQuality);
+            const ctx = this.host.ctx;
+            const profile = this.host.getQualityProfile(gameState.renderQuality);
             const caveDetail = profile.caveDetail || 'low';
         
             ctx.save();
@@ -283,7 +288,7 @@ export function installRendererCave(Renderer) {
                 if (p.type === 'drip') {
                     if (p.glowing) {
                         ctx.globalCompositeOperation = 'screen';
-                        const rgb = this.hexToRgb(p.color || '#88CCFF');
+                        const rgb = this.host.hexToRgb(p.color || '#88CCFF');
                         ctx.fillStyle = rgb
                             ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha * 0.8})`
                             : `rgba(136, 204, 255, ${alpha * 0.8})`;
@@ -304,7 +309,7 @@ export function installRendererCave(Renderer) {
                     }
                 } else if (p.type === 'mote') {
                     ctx.globalCompositeOperation = 'screen';
-                    const rgb = this.hexToRgb(p.color || '#FFAA44');
+                    const rgb = this.host.hexToRgb(p.color || '#FFAA44');
                     ctx.fillStyle = rgb
                         ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha * 0.7})`
                         : `rgba(255, 170, 68, ${alpha * 0.7})`;
@@ -331,5 +336,5 @@ export function installRendererCave(Renderer) {
             ctx.globalCompositeOperation = 'source-over';
             ctx.restore();
         }
-    });
+    
 }

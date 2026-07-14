@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const COLORS = [
     { name: 'Ruby', hex: '#FF0055', glow: 'rgba(255, 0, 85, 0.6)' },
     { name: 'Emerald', hex: '#00FF66', glow: 'rgba(0, 255, 102, 0.6)' },

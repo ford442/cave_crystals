@@ -12,15 +12,19 @@
     "verify:build": "npm run build",
     "verify:smoke": "python3 verification/verify_juice.py",
     "verify:visual": "python3 verification/run_all.py",
-    "verify": "npm run verify:build && npm run verify:smoke"
+    "verify": "npm run verify:build && npm run verify:smoke",
+    "typecheck": "tsc --noEmit",
+    "test:wasm": "npm run asbuild:release && node --test test/wasm/*.test.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "type": "module",
   "devDependencies": {
     "@assemblyscript/loader": "^0.28.9",
     "acorn": "^8.16.0",
     "assemblyscript": "^0.28.9",
+    "typescript": "^5.8.3",
     "vite": "^5.0.0"
   }
 }

@@ -1,217 +1,183 @@
-import { GAME_CONFIG, RENDER_QUALITY_PROFILES, resolveParticleStride } from './RendererConstants.js';
-import { installRendererPostEffects } from './RendererPostEffects.js';
-import { installRendererInterfaceEffects } from './RendererInterfaceEffects.js';
-import { installRendererCrystal } from './RendererCrystal.js';
-import { installRendererCave } from './RendererCave.js';
+/** @import { GameState, Launcher, RenderQualityLevel, RenderQualityProfile } from './types.js' */
+
+import { resolveParticleStride } from './RendererConstants.js';
+import { RendererHost } from './renderers/RendererHost.js';
+import { CrystalRenderer } from './renderers/CrystalRenderer.js';
+import { CaveRenderer } from './renderers/CaveRenderer.js';
+import { PostEffectsRenderer } from './renderers/PostEffectsRenderer.js';
+import { HudEffectsRenderer } from './renderers/HudEffectsRenderer.js';
+import { ParticleRenderer } from './renderers/ParticleRenderer.js';
 
 export class Renderer {
+    /**
+     * @param {HTMLCanvasElement} canvas
+     */
     constructor(canvas) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.width = canvas.width;
-        this.height = canvas.height;
-        this.laneWidth = this.width / GAME_CONFIG.lanes;
-        this._gradientCache = new Map();
+        this.host = new RendererHost(canvas);
+        this.host.crystal = new CrystalRenderer(this.host);
+        this.host.cave = new CaveRenderer(this.host);
+        this.host.post = new PostEffectsRenderer(this.host);
+        this.host.hud = new HudEffectsRenderer(this.host);
+        this.host.particles = new ParticleRenderer(this.host);
 
-        // Offscreen canvas for scanlines pattern (Fix 7)
-        this.scanlineCanvas = document.createElement('canvas');
-        this.scanlineCanvas.width = 1;
-        this.scanlineCanvas.height = 4;
-        const sctx = this.scanlineCanvas.getContext('2d');
-        sctx.fillStyle = 'rgba(0, 0, 0, 1)';
-        sctx.fillRect(0, 0, 1, 2); // 2px line, 2px gap
-
-        // Cache scanline pattern once
-        this.scanlinePattern = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
-
-        // Cache for glitch rects (regenerated only when intensity changes)
-        this._glitchRects = [];
-        this._glitchIntensity = -1;
-
-        // Cache for vignette gradients (invalidated on resize)
-        this._vignetteGradient = null;
-        this._baseVignetteGradient = null;
-        this._fogGradient = null;
-        this._fogSweepGrad = null;
-        this._qualityProfiles = RENDER_QUALITY_PROFILES;
-
-        // Film grain: upgraded to 256×256 for higher-quality multi-octave noise
-        this._grainCanvas = document.createElement('canvas');
-        this._grainCanvas.width = 256;
-        this._grainCanvas.height = 256;
-        this._grainCtx = this._grainCanvas.getContext('2d');
-        this._grainPattern = null;
-
-        // Bloom offscreen buffer at 1/4 resolution
-        this._bloomCanvas = document.createElement('canvas');
-        this._bloomCanvas.width = Math.max(4, Math.floor(canvas.width / 4));
-        this._bloomCanvas.height = Math.max(4, Math.floor(canvas.height / 4));
-        this._bloomCtx = this._bloomCanvas.getContext('2d');
-        this._bloomGradCache = new Map();
-        this._shaftGradCache = new Map();
-        this._shaftGradCacheH = 0;
-
-        // Cave environment geometry (seeded, regenerated on resize)
-        this._caveGeometry = null;
-        this._caveGeometryW = 0;
-        this._caveGeometryH = 0;
-
-        // Per-frame shockwave distortion field (precomputed once per draw)
-        this._distortionField = null;
-        this._distortionLookupCount = 0;
+        /** @type {CrystalRenderer} */
+        this.crystal = this.host.crystal;
+        /** @type {CaveRenderer} */
+        this.cave = this.host.cave;
+        /** @type {PostEffectsRenderer} */
+        this.post = this.host.post;
+        /** @type {HudEffectsRenderer} */
+        this.hud = this.host.hud;
+        /** @type {ParticleRenderer} */
+        this.particles = this.host.particles;
     }
 
+    /** @returns {HTMLCanvasElement} */
+    get canvas() { return this.host.canvas; }
+
+    /** @returns {CanvasRenderingContext2D | null} */
+    get ctx() { return this.host.ctx; }
+
+    /** @returns {number} */
+    get width() { return this.host.width; }
+
+    /** @returns {number} */
+    get height() { return this.host.height; }
+
+    /** @returns {number} */
+    get laneWidth() { return this.host.laneWidth; }
+
+    /** Back-compat for GameRuntime drip spawn positions. */
+    get _caveGeometry() { return this.host._caveGeometry; }
+
+    /**
+     * @param {number} w
+     * @param {number} h
+     */
     resize(w, h) {
-        this.width = w;
-        this.height = h;
-        this.canvas.width = w;
-        this.canvas.height = h;
-        this.laneWidth = w / GAME_CONFIG.lanes;
-        this._vignetteGradient = null; // invalidate cached gradients
-        this._baseVignetteGradient = null;
-        this._fogGradient = null;
-        this._fogSweepGrad = null;
-        // Resize bloom buffer to match new resolution
-        this._bloomCanvas.width = Math.max(4, Math.floor(w / 4));
-        this._bloomCanvas.height = Math.max(4, Math.floor(h / 4));
-        this._bloomGradCache.clear();
-        this._shaftGradCache.clear();
-        this._shaftGradCacheH = 0;
-        // Invalidate cave geometry so it regenerates at new resolution
-        this._caveGeometry = null;
+        this.host.resize(w, h);
     }
 
     clear() {
         // No-op: clear is combined with the dark overlay in draw()
     }
 
+    /**
+     * @param {RenderQualityLevel} [quality]
+     * @returns {RenderQualityProfile}
+     */
     getQualityProfile(quality = 'high') {
-        return this._qualityProfiles[quality] || this._qualityProfiles.high;
+        return this.host.getQualityProfile(quality);
     }
 
+    /**
+     * @param {GameState} gameState
+     * @param {Launcher} launcher
+     * @param {number} [timestamp]
+     */
     draw(gameState, launcher, timestamp = performance.now()) {
-        if (!this.ctx) return;
-        const profile = this.getQualityProfile(gameState.renderQuality);
+        const { host, crystal, cave, post, hud, particles } = this;
+        if (!host.ctx) return;
+        const profile = host.getQualityProfile(gameState.renderQuality);
 
-        // JUICE: Dynamic Lighting System
-        // 1. Clear + darken in one fill
-        this.ctx.fillStyle = 'rgba(0, 0, 10, 1.0)';
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        host.ctx.fillStyle = 'rgba(0, 0, 10, 1.0)';
+        host.ctx.fillRect(0, 0, host.width, host.height);
 
-        // Cave background layers (parallax, drawn before lighting so crystal lights illuminate cave walls)
-        this.drawCaveLayers(gameState, timestamp);
+        cave.drawCaveLayers(gameState, timestamp);
+        post.drawLighting(gameState, launcher, profile, timestamp);
 
-        // 2. Render Additive Lighting Pass
-        this.drawLighting(gameState, launcher, profile, timestamp);
-
-        // Background Color Override based on Flash
         if (gameState.impactFlash > 0.3) {
-             // Subtle background tinting during strong flashes
-             this.ctx.fillStyle = gameState.impactFlashColor || '#000';
-             this.ctx.globalAlpha = gameState.impactFlash * 0.2;
-             this.ctx.fillRect(0, 0, this.width, this.height);
-             this.ctx.globalAlpha = 1.0;
+            host.ctx.fillStyle = gameState.impactFlashColor || '#000';
+            host.ctx.globalAlpha = gameState.impactFlash * 0.2;
+            host.ctx.fillRect(0, 0, host.width, host.height);
+            host.ctx.globalAlpha = 1.0;
         }
 
-        this.ctx.save();
+        host.ctx.save();
 
-        // Calculate Chromatic Aberration Magnitude based on Shake AND Player Velocity
-        // "Warp Drive" Effect: Moving fast distorts reality
         const launcherSpeed = launcher ? launcher.speed : 0;
-        // JUICE: Increased warp sensitivity to speed for more impact
         const warpMagnitude = gameState.shake + (launcherSpeed * 2.5);
-
         const particleCount = gameState.particles ? gameState.particles.length : 0;
         const isWarping = warpMagnitude > 3.0;
 
-        // Precompute shockwave distortion once per frame (crystals, launcher, grid)
-        this.prepareShockwaveDistortionField(gameState, profile, particleCount, launcher);
+        crystal.prepareShockwaveDistortionField(gameState, profile, particleCount, launcher);
 
-        // JUICE: Impact Zoom
         if (gameState.zoom && gameState.zoom > 1.0) {
-            const zx = gameState.zoomFocus ? gameState.zoomFocus.x : this.width / 2;
-            const zy = gameState.zoomFocus ? gameState.zoomFocus.y : this.height / 2;
-            this.ctx.translate(zx, zy);
-            this.ctx.scale(gameState.zoom, gameState.zoom);
-            this.ctx.translate(-zx, -zy);
+            const zx = gameState.zoomFocus ? gameState.zoomFocus.x : host.width / 2;
+            const zy = gameState.zoomFocus ? gameState.zoomFocus.y : host.height / 2;
+            host.ctx.translate(zx, zy);
+            host.ctx.scale(gameState.zoom, gameState.zoom);
+            host.ctx.translate(-zx, -zy);
         }
 
-        // Apply centralized shake offset (calculated in Game.js for sync with background)
         if (gameState.shakeOffset) {
-             // Rotate around center
-             const cx = this.width / 2;
-             const cy = this.height / 2;
-
-             this.ctx.translate(cx, cy);
-             this.ctx.rotate(gameState.shakeOffset.angle || 0);
-             this.ctx.translate(-cx, -cy);
-
-             this.ctx.translate(gameState.shakeOffset.x || 0, gameState.shakeOffset.y || 0);
+            const cx = host.width / 2;
+            const cy = host.height / 2;
+            host.ctx.translate(cx, cy);
+            host.ctx.rotate(gameState.shakeOffset.angle || 0);
+            host.ctx.translate(-cx, -cy);
+            host.ctx.translate(gameState.shakeOffset.x || 0, gameState.shakeOffset.y || 0);
         } else if (gameState.shake > 0) {
             const dx = (Math.random() - 0.5) * gameState.shake;
             const dy = (Math.random() - 0.5) * gameState.shake;
-            this.ctx.translate(dx, dy);
+            host.ctx.translate(dx, dy);
         }
 
         if (gameState.dustParticles) {
-            this.drawDust(gameState.dustParticles, profile.maxDust);
+            post.drawDust(gameState.dustParticles, profile.maxDust);
         }
 
-        // Environmental drip/mote particles (before fog, to feel embedded in atmosphere)
         if (gameState.envParticles && gameState.envParticles.length > 0) {
-            this.drawEnvironmentalParticles(gameState.envParticles, gameState, timestamp);
+            cave.drawEnvironmentalParticles(gameState.envParticles, gameState, timestamp);
         }
 
         if (profile.fog) {
-            this.drawVolumetricFog(gameState, profile, timestamp);
+            post.drawVolumetricFog(gameState, profile, timestamp);
         }
 
-        // Cave wall overlays drawn after fog so stalactites emerge from mist
-        this.drawCaveWallOverlays(gameState, timestamp);
+        cave.drawCaveWallOverlays(gameState, timestamp);
+        hud.drawHoloGrid(gameState, launcher, profile, timestamp);
+        hud.drawTargetingSystem(gameState, launcher, timestamp);
 
-        this.drawHoloGrid(gameState, launcher, profile, timestamp);
-        this.drawTargetingSystem(gameState, launcher, timestamp);
-
-        // Draw Crystals (skip chromatic aberration on crystals during explosions)
         for (let i = 0; i < gameState.crystals.length; i++) {
             const c = gameState.crystals[i];
-            const distortion = this.getCrystalDistortion(i);
-            this.drawComplexCrystal(
+            const distortion = crystal.getCrystalDistortion(i);
+            crystal.drawComplexCrystal(
                 c, null, particleCount, profile, timestamp, launcher, gameState.spores,
                 distortion.x, distortion.y
             );
         }
 
-        // Draw Launcher with Chromatic Aberration (Motion Blur)
         if (launcher) {
-            const distortion = this.getLauncherDistortion();
+            const distortion = crystal.getLauncherDistortion();
             const hasDist = distortion.x !== 0 || distortion.y !== 0;
             if (hasDist || isWarping) {
-                this.ctx.save();
-                if (hasDist) this.ctx.translate(distortion.x, distortion.y);
+                host.ctx.save();
+                if (hasDist) host.ctx.translate(distortion.x, distortion.y);
 
                 if (isWarping) {
-                    this.ctx.globalCompositeOperation = 'screen';
-                    this.ctx.save();
-                    this.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
-                    this.drawCursor(gameState, launcher, 'red');
-                    this.ctx.restore();
+                    host.ctx.globalCompositeOperation = 'screen';
+                    host.ctx.save();
+                    host.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
+                    hud.drawCursor(gameState, launcher, 'red');
+                    host.ctx.restore();
 
-                    this.ctx.save();
-                    this.ctx.translate(4 + (warpMagnitude * 0.2), 0);
-                    this.drawCursor(gameState, launcher, 'blue');
-                    this.ctx.restore();
+                    host.ctx.save();
+                    host.ctx.translate(4 + (warpMagnitude * 0.2), 0);
+                    hud.drawCursor(gameState, launcher, 'blue');
+                    host.ctx.restore();
 
-                    this.ctx.globalCompositeOperation = 'source-over';
+                    host.ctx.globalCompositeOperation = 'source-over';
                 }
-                this.drawCursor(gameState, launcher);
-                this.ctx.restore();
+                hud.drawCursor(gameState, launcher);
+                host.ctx.restore();
             } else {
-                this.drawCursor(gameState, launcher);
+                hud.drawCursor(gameState, launcher);
             }
         }
+
         for (let i = 0; i < gameState.spores.length; i++) {
-            this.drawSpore(gameState.spores[i], timestamp);
+            hud.drawSpore(gameState.spores[i], timestamp);
         }
 
         const particleLimit = Math.min(profile.maxParticles, particleCount);
@@ -223,85 +189,70 @@ export class Renderer {
         if (gameState.perfMetrics) {
             gameState.perfMetrics.particleStride = stride;
         }
-        this.drawParticlesBatched(gameState.particles, particleLimit, stride, gameState);
+        particles.drawParticlesBatched(gameState.particles, particleLimit, stride, gameState);
 
         if (gameState.shockwaves) {
             for (let i = 0; i < gameState.shockwaves.length; i++) {
-               const sw = gameState.shockwaves[i];
-               if (sw.x + sw.radius < 0 || sw.x - sw.radius > this.width || sw.y + sw.radius < 0 || sw.y - sw.radius > this.height) continue;
-               this.drawShockwave(sw);
+                const sw = gameState.shockwaves[i];
+                if (sw.x + sw.radius < 0 || sw.x - sw.radius > host.width || sw.y + sw.radius < 0 || sw.y - sw.radius > host.height) continue;
+                particles.drawShockwave(sw);
             }
         }
 
         if (gameState.energyRings) {
             for (let i = 0; i < gameState.energyRings.length; i++) {
-               const ring = gameState.energyRings[i];
-               if (ring.x + ring.radius < 0 || ring.x - ring.radius > this.width || ring.y + ring.radius < 0 || ring.y - ring.radius > this.height) continue;
-               this.drawEnergyRing(ring);
+                const ring = gameState.energyRings[i];
+                if (ring.x + ring.radius < 0 || ring.x - ring.radius > host.width || ring.y + ring.radius < 0 || ring.y - ring.radius > host.height) continue;
+                particles.drawEnergyRing(ring);
             }
         }
 
         if (gameState.floatingTexts) {
             for (let i = 0; i < gameState.floatingTexts.length; i++) {
-               const ft = gameState.floatingTexts[i];
-               if (ft.y + 40 < 0 || ft.y - 40 > this.height) continue;
-               this.drawFloatingText(ft);
+                const ft = gameState.floatingTexts[i];
+                if (ft.y + 40 < 0 || ft.y - 40 > host.height) continue;
+                particles.drawFloatingText(ft);
             }
         }
 
         if (gameState.soulParticles) {
             for (let i = 0; i < gameState.soulParticles.length; i++) {
-               const sp = gameState.soulParticles[i];
-               if (sp.x + sp.size < 0 || sp.x - sp.size > this.width || sp.y + sp.size < 0 || sp.y - sp.size > this.height) continue;
-               this.drawSoulParticle(sp);
+                const sp = gameState.soulParticles[i];
+                if (sp.x + sp.size < 0 || sp.x - sp.size > host.width || sp.y + sp.size < 0 || sp.y - sp.size > host.height) continue;
+                particles.drawSoulParticle(sp);
             }
         }
 
-        this.ctx.restore();
+        host.ctx.restore();
 
         if (gameState.devPerfOverlay && gameState.perfMetrics) {
-            gameState.perfMetrics.distortionLookupCount = this._distortionLookupCount || 0;
+            gameState.perfMetrics.distortionLookupCount = host._distortionLookupCount || 0;
         }
 
-        // --- Cinematic Post-Processing Stack ---
-
-        // 1. Bloom — bright elements bleed into fog and environment (high only)
         if (profile.bloom) {
-            this.drawBloom(gameState, profile, timestamp);
+            post.drawBloom(gameState, profile, timestamp);
         }
 
-        // 2. Enhanced light shafts (reactive to crystals and explosions)
         if (profile.lightShafts) {
-            this.drawLightShafts(gameState, launcher, timestamp, profile);
+            post.drawLightShafts(gameState, launcher, timestamp, profile);
         }
 
-        // 3. Dynamic color grading — contrast/saturation shift by danger and combo
         if (profile.colorGrade) {
-            this.drawColorGrade(gameState, timestamp);
+            post.drawColorGrade(gameState, timestamp);
         }
 
-        // 4. Unified film pass — grain, vignette, scanlines, glitch
         if (profile.postFX) {
-            this.drawFilmPass(gameState, timestamp, profile);
+            post.drawFilmPass(gameState, timestamp, profile);
         } else if (gameState.criticalIntensity > 0.01) {
-            // Always show danger vignette, even on low quality
-            this.drawVignette(gameState.criticalIntensity, timestamp);
+            post.drawVignette(gameState.criticalIntensity, timestamp);
         }
 
-        // 5. Impact flash (always active when triggered, on top of everything)
         if (gameState.impactFlash > 0) {
-            this.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
+            post.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
         }
 
-        // JUICE: Dev-only perf overlay (toggle P or window.__DEV_PERF__)
         if (gameState.devPerfOverlay) {
-            this.drawDevMetricsOverlay(gameState, profile);
+            hud.drawDevMetricsOverlay(gameState, profile);
         }
     }
-
 }
-
-installRendererPostEffects(Renderer);
-installRendererInterfaceEffects(Renderer);
-installRendererCrystal(Renderer);
-installRendererCave(Renderer);

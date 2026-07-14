@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Reusable easing helpers for animation juice
 
 /**

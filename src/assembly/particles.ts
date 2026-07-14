@@ -69,8 +69,9 @@ const TRAIL_BATCH_STRIDE: i32 = 6;
 // Layout per trail: x, y, vx, vy, life, size
 const _trailBatch = new Float64Array(TRAIL_BATCH_MAX * TRAIL_BATCH_STRIDE);
 
+/** Linear-memory byte offset for JS Float64Array views (not TypedArray.byteOffset). */
 export function getSimpleBatchByteOffset(): i32 {
-    return _simpleBatch.byteOffset;
+    return _simpleBatch.dataStart as i32;
 }
 
 export function getSimpleBatchFloatCount(): i32 {
@@ -81,8 +82,9 @@ export function getSimpleBatchStride(): i32 {
     return SIMPLE_BATCH_STRIDE;
 }
 
+/** Linear-memory byte offset for JS Float64Array views (not TypedArray.byteOffset). */
 export function getTrailBatchByteOffset(): i32 {
-    return _trailBatch.byteOffset;
+    return _trailBatch.dataStart as i32;
 }
 
 export function getTrailBatchFloatCount(): i32 {

@@ -1,19 +1,42 @@
+/** @import { GameState, QualityMode } from './types.js' */
+
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
 import { Crystal, Spore, Particle, TrailParticle, Shockwave,
-         FloatingText, Launcher, DustParticle, ParticlePool } from './Entities.js';
+         FloatingText, Launcher, DustParticle, ParticlePool, EnergyRing } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
 import { installGameRuntime } from './GameRuntime.js';
 
+/**
+ * Core game controller. Frame loop methods are mixed in from GameRuntime.js.
+ *
+ * @property {number} [_smoothedFps]
+ * @property {number} [_qualityCooldownUntil]
+ * @property {number} [_fpsLastTime]
+ * @property {number} [_fpsFrames]
+ * @property {number} [_lastScoreScale]
+ * @property {() => void} [_boundLoop]
+ * @property {import('./types.js').CreateParticlesCallback} [_boundCreateParticles]
+ * @property {() => void} [_boundCreateShockwave]
+ * @property {import('./types.js').CreateTrailCallback} [_boundCreateTrailParticle]
+ * @property {import('./types.js').CreateDebrisCallback} [_boundCreateDebris]
+ * @property {import('./types.js').CreateChunkCallback} [_boundCreateCrystalChunk]
+ * @property {import('./types.js').ImpactDustCallback} [_boundCreateImpactDust]
+ * @property {() => void} [_boundUpdateUI]
+ * @property {import('./types.js').SporeScoreCallback} [_boundOnSporeScore]
+ * @property {import('./Entities.js').Particle[]} [_ambientBatch]
+ * @property {import('./Entities.js').TrailParticle[]} [_trailUpdateBatch]
+ */
 export class Game {
     constructor() {
         this.background = new Background();
-        this.canvas = document.getElementById('gameCanvas');
+        this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
         this.renderer = new Renderer(this.canvas);
         this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
 
+        /** @type {import('./types.js').GameUiElements} */
         this.ui = {
             start: document.getElementById('startScreen'),
             gameOver: document.getElementById('gameOverScreen'),
@@ -24,9 +47,10 @@ export class Game {
             startBtn: document.getElementById('startBtn'),
             restartBtn: document.getElementById('restartBtn'),
             fps: document.getElementById('fpsCounter'),
-            qualitySelect: document.getElementById('qualitySelect')
+            qualitySelect: /** @type {HTMLSelectElement | null} */ (document.getElementById('qualitySelect'))
         };
 
+        /** @type {import('./types.js').GameState} */
         this.state = {
             active: false,
             score: 0,
@@ -124,6 +148,17 @@ export class Game {
         this._ambientBatch = new Array(512);
         this._trailUpdateBatch = new Array(512);
 
+        /** @type {number | undefined} */
+        this._smoothedFps = undefined;
+        /** @type {number | undefined} */
+        this._qualityCooldownUntil = undefined;
+        /** @type {number | undefined} */
+        this._fpsLastTime = undefined;
+        /** @type {number | undefined} */
+        this._fpsFrames = undefined;
+        /** @type {number | undefined} */
+        this._lastScoreScale = undefined;
+
         if (typeof window !== 'undefined' && window.__DEV_PERF__) {
             this.state.devPerfOverlay = true;
         }
@@ -133,6 +168,10 @@ export class Game {
         requestAnimationFrame(this._boundLoop);
     }
 
+    /**
+     * @param {boolean} [force]
+     * @returns {boolean}
+     */
     toggleDevPerfOverlay(force) {
         this.state.devPerfOverlay = typeof force === 'boolean' ? force : !this.state.devPerfOverlay;
         this._updateFpsHud();
@@ -157,7 +196,7 @@ export class Game {
         this.ui.startBtn.addEventListener('click', () => this.startGame());
         this.ui.restartBtn.addEventListener('click', () => this.resetGame());
         if (this.ui.qualitySelect) {
-            this.ui.qualitySelect.addEventListener('change', () => this.setQualityMode(this.ui.qualitySelect.value));
+            this.ui.qualitySelect.addEventListener('change', () => this.setQualityMode(/** @type {QualityMode} */ (this.ui.qualitySelect.value)));
         }
         window.addEventListener('resize', () => this.resize());
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
@@ -179,7 +218,7 @@ export class Game {
 
     startGame() {
         SoundManager.init();
-        this.setQualityMode(this.ui.qualitySelect ? this.ui.qualitySelect.value : this.state.qualityMode);
+        this.setQualityMode(/** @type {QualityMode} */ (this.ui.qualitySelect ? this.ui.qualitySelect.value : this.state.qualityMode));
         this.state.active = true;
         this.state.score = 0;
         this.state.level = 1;
@@ -296,6 +335,7 @@ export class Game {
         this.createParticles(x, y, color, 3, -Math.PI/2, 2.0, 'spark');
     }
 
+    /** @param {import('./types.js').Crystal} crystal */
     createCrystalAura(crystal) {
         const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         if (this.state.particles.length >= profile.maxParticles) return;
@@ -316,6 +356,12 @@ export class Game {
         }
     }
 
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * @param {number} combo
+     */
     createMatchBurst(x, y, color, combo) {
         const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         const qualityScale = this.getQualityScale();
@@ -466,6 +512,7 @@ export class Game {
         this.state.floatingTexts.push(new FloatingText(x, y, text, color, scale));
     }
 
+    /** @param {string} hexColor */
     triggerResonance(hexColor) {
         const profile = this.renderer.getQualityProfile(this.state.renderQuality);
         this.state.crystals.forEach(c => {
@@ -547,6 +594,60 @@ export class Game {
         });
     }
 
+    /** @param {number} dt Installed by GameRuntime.js */
+    update(dt) {}
+
+    /** @param {number} dt @param {number} [timeScale] Installed by GameRuntime.js */
+    updateSharedVisuals(dt, timeScale) {}
+
+    /** Installed by GameRuntime.js */
+    updateUI() {}
+
+    /**
+     * @param {number} points
+     * @param {boolean} isMatch
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * Installed by GameRuntime.js
+     */
+    _onSporeScore(points, isMatch, x, y, color) {}
+
+    /** @returns {number} Installed by GameRuntime.js */
+    getQualityScale() { return 1; }
+
+    /**
+     * @param {number} fps
+     * @param {number} lowThreshold
+     * @param {number} mediumThreshold
+     * @returns {import('./types.js').RenderQualityLevel}
+     * Installed by GameRuntime.js
+     */
+    resolveQualityForFps(fps, lowThreshold, mediumThreshold) { return 'high'; }
+
+    /** @param {QualityMode} [mode] Installed by GameRuntime.js */
+    setQualityMode(mode) {}
+
+    /** Installed by GameRuntime.js */
+    resetAdaptiveOverrides() {}
+
+    /** @param {number} fps Installed by GameRuntime.js */
+    updateAdaptiveQuality(fps) {}
+
+    /** @param {number} dt @param {number} [fps] Installed by GameRuntime.js */
+    updatePerfMetrics(dt, fps) {}
+
+    /** Installed by GameRuntime.js */
+    updateFrameTimeAdaptive() {}
+
+    /** @param {number} timestamp Installed by GameRuntime.js */
+    loop(timestamp) {}
+
+    /** Installed by GameRuntime.js */
+    shatterAllCrystals() {}
+
+    /** @param {number} dt Installed by GameRuntime.js */
+    updateVisuals(dt) {}
 }
 
 installGameRuntime(Game);

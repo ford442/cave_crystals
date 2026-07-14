@@ -1,3 +1,5 @@
+/** @import { GameState, QualityMode, RenderQualityLevel } from './types.js' */
+
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
 import { EnergyRing, SoulParticle } from './Entities.js';
@@ -15,8 +17,15 @@ const ADAPTIVE_QUALITY = {
     cooldownFastMs: 2000
 };
 
+/**
+ * @param {typeof import('./Game.js').Game} Game
+ */
 export function installGameRuntime(Game) {
     Object.assign(Game.prototype, {
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} dt
+         */
         update(dt) {
             // Time Dilation Logic
             if (this.state.slowMoTimer > 0) {
@@ -152,7 +161,7 @@ export function installGameRuntime(Game) {
         
                 // Delay showing UI slightly to let the explosion be seen
                 setTimeout(() => {
-                    this.ui.finalScore.innerText = this.state.score;
+                    this.ui.finalScore.innerText = String(this.state.score);
                     this.ui.gameOver.classList.remove('hidden');
                 }, 1000);
                 return;
@@ -190,6 +199,11 @@ export function installGameRuntime(Game) {
             this.updateSharedVisuals(dt, timeScale);
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} dt
+         * @param {number} [timeScale]
+         */
         updateSharedVisuals(dt, timeScale = 1.0) {
             const trackMs = this.state.devPerfOverlay;
             const updateT0 = trackMs ? performance.now() : 0;
@@ -215,15 +229,17 @@ export function installGameRuntime(Game) {
 
             // Update Particles — ambient + trail types batched for WASM/JS fast paths
             for (let i = particles.length - 1; i >= 0; i--) {
-                const p = particles[i];
+                const raw = particles[i];
 
-                if (p.type === 'aura' || p.type === 'ember') {
-                    if (ambientCount < ambientBatch.length) ambientBatch[ambientCount++] = p;
+                if (raw.isTrail) {
+                    if (trailCount < trailBatch.length) trailBatch[trailCount++] = raw;
                     continue;
                 }
 
-                if (p.isTrail) {
-                    if (trailCount < trailBatch.length) trailBatch[trailCount++] = p;
+                const p = /** @type {import('./Entities.js').Particle} */ (raw);
+
+                if (p.type === 'aura' || p.type === 'ember') {
+                    if (ambientCount < ambientBatch.length) ambientBatch[ambientCount++] = p;
                     continue;
                 }
 
@@ -270,7 +286,9 @@ export function installGameRuntime(Game) {
                     }
                 }
                 for (let i = particles.length - 1; i >= 0; i--) {
-                    const p = particles[i];
+                    const raw = particles[i];
+                    if (raw.isTrail) continue;
+                    const p = /** @type {import('./Entities.js').Particle} */ (raw);
                     if ((p.type === 'aura' || p.type === 'ember') && p.life <= 0) {
                         removeParticleAt(i);
                     }
@@ -451,7 +469,7 @@ export function installGameRuntime(Game) {
         
             // Only update DOM if score changed significantly (counting up effect)
             if (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore)) {
-                 this.ui.score.innerText = Math.floor(this.state.displayScore);
+                 this.ui.score.innerText = String(Math.floor(this.state.displayScore));
             }
             // Cache score transform to avoid style recalc every frame
             const newScale = 1.0 + (this.state.shake * 0.01) + (Math.floor(oldDisplay) !== Math.floor(this.state.displayScore) ? 0.1 : 0);
@@ -461,15 +479,24 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        /** @this {import('./Game.js').Game} */
         updateUI() {
-            this.ui.score.innerText = Math.floor(this.state.displayScore);
-            this.ui.level.innerText = Math.floor(this.state.score / 500) + 1;
+            this.ui.score.innerText = String(Math.floor(this.state.displayScore));
+            this.ui.level.innerText = String(Math.floor(this.state.score / 500) + 1);
         
             const nextCol = COLORS[this.state.nextSporeColorIdx];
             this.ui.preview.style.backgroundColor = nextCol.hex;
             this.ui.preview.style.boxShadow = `0 0 20px ${nextCol.hex}`;
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} points
+         * @param {boolean} isMatch
+         * @param {number} x
+         * @param {number} y
+         * @param {string} color
+         */
         _onSporeScore(points, isMatch, x, y, color) {
             if (isMatch) {
                 // Spawn Soul Particles for Collection Juice
@@ -543,18 +570,27 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        /** @this {import('./Game.js').Game} @returns {number} */
         getQualityScale() {
             if (this.state.renderQuality === 'low') return 0.55;
             if (this.state.renderQuality === 'medium') return 0.8;
             return 1.0;
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} fps
+         * @param {number} lowThreshold
+         * @param {number} mediumThreshold
+         * @returns {RenderQualityLevel}
+         */
         resolveQualityForFps(fps, lowThreshold, mediumThreshold) {
             if (fps < lowThreshold) return 'low';
             if (fps < mediumThreshold) return 'medium';
             return 'high';
         }
         ,
+        /** @this {import('./Game.js').Game} @param {QualityMode} [mode] */
         setQualityMode(mode = 'auto') {
             const prevQuality = this.state.renderQuality;
             this.state.qualityMode = mode;
@@ -577,11 +613,16 @@ export function installGameRuntime(Game) {
             this._updateFpsHud();
         }
         ,
+        /** @this {import('./Game.js').Game} */
         resetAdaptiveOverrides() {
             this.state.adaptiveOverrides.particleStrideBoost = 0;
             this.state.adaptiveOverrides.effectScale = 1.0;
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} fps
+         */
         updateAdaptiveQuality(fps) {
             if (!this._smoothedFps) this._smoothedFps = fps;
             this._smoothedFps += (fps - this._smoothedFps) * ADAPTIVE_QUALITY.fpsSmoothingFactor;
@@ -603,6 +644,11 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} dt
+         * @param {number} [fps]
+         */
         updatePerfMetrics(dt, fps) {
             const metrics = this.state.perfMetrics;
             metrics.frameMs = dt;
@@ -640,6 +686,7 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        /** @this {import('./Game.js').Game} */
         updateFrameTimeAdaptive() {
             const budget = ADAPTIVE_FRAME_BUDGET;
             const overrides = this.state.adaptiveOverrides;
@@ -672,6 +719,10 @@ export function installGameRuntime(Game) {
             }
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} timestamp
+         */
         loop(timestamp) {
             if (!this.state.lastTime) this.state.lastTime = timestamp;
             let dt = timestamp - this.state.lastTime;
@@ -720,6 +771,7 @@ export function installGameRuntime(Game) {
             requestAnimationFrame(this._boundLoop);
         }
         ,
+        /** @this {import('./Game.js').Game} */
         shatterAllCrystals() {
             // JUICE: Massive explosion of all crystals
             this.state.targetTimeScale = 0.1;
@@ -776,6 +828,10 @@ export function installGameRuntime(Game) {
             this.state.crystals = [];
         }
         ,
+        /**
+         * @this {import('./Game.js').Game}
+         * @param {number} dt
+         */
         updateVisuals(dt) {
             // Shake decay
             if (this.state.shake > 0) {

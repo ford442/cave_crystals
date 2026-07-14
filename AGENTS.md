@@ -83,6 +83,14 @@ Build WASM only (debug + release):
 npm run asbuild
 ```
 
+Validate WASM ABI and JS/WASM parity (requires release build):
+
+```bash
+npm run test:wasm
+```
+
+See `docs/WASM.md` for what belongs in WASM vs JavaScript.
+
 ## Build Configuration Details
 
 - `asconfig.json` defines two AssemblyScript targets:
@@ -120,6 +128,7 @@ npm run asbuild
   - `seed` → `Math.random()`
 - The WASM module includes a custom LCG random number generator (`fastRandom`) seeded from JS.
 - **JS fallback behavior**: `WasmManager` provides JS fallbacks for every export. For trivial math (e.g., `calculateCrystalGrowth`, `calculateGrowthMultiplier`, `checkCrystalGameOver`), the manager intentionally always uses JS to avoid WASM call overhead. Functions that may actually invoke WASM when ready include collision detection (`checkCollisions`), particle velocity helpers (`getShatterVx`, `getDirectionalVx`, etc.), bounce physics (`getBounceVy`), smoke drift (`getSmokeVx`), and homing steering (`calculateHomingVx`/`Vy`).
+- **Contract tests**: `npm run test:wasm` validates the release WASM ABI and JS/WASM parity after `npm run asbuild:release`. See `docs/WASM.md`.
 
 ## Testing / Verification
 

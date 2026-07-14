@@ -1,3 +1,4 @@
+// @ts-nocheck
 // --- AUDIO SYSTEM (WEB AUDIO API) ---
 export const SoundManager = {
     ctx: null,

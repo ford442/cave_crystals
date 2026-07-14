@@ -1,3 +1,5 @@
+/** @import { AdaptiveOverrides, AnyParticle, RenderQualityProfile } from './types.js' */
+
 import { COLORS, GAME_CONFIG } from './Constants.js';
 
 const FILM_GRAIN_REFRESH_INTERVAL_MS = 90;
@@ -24,6 +26,14 @@ const ADAPTIVE_FRAME_BUDGET = {
     effectScaleStep: 0.06
 };
 
+/**
+ * @param {RenderQualityProfile} profile
+ * @param {number} particleCount
+ * @param {AdaptiveOverrides | null} [adaptiveOverrides]
+ * @param {number} [frameMs]
+ * @param {number} [instantFrameMs]
+ * @returns {number}
+ */
 function resolveParticleStride(profile, particleCount, adaptiveOverrides = null, frameMs = 16.7, instantFrameMs = frameMs) {
     let stride = profile.particleStride;
     const maxP = profile.maxParticles;
@@ -47,10 +57,17 @@ function resolveParticleStride(profile, particleCount, adaptiveOverrides = null,
 
 const PRIORITY_PARTICLE_TYPES = new Set(['chunk', 'shard', 'debris']);
 
+/**
+ * @param {number} index
+ * @param {InstanceType<typeof import('./Entities.js').Particle> | InstanceType<typeof import('./Entities.js').TrailParticle>} particle
+ * @param {number} stride
+ * @returns {boolean}
+ */
 function shouldDrawParticleWithStride(index, particle, stride) {
     if (stride <= 1) return true;
-    if (PRIORITY_PARTICLE_TYPES.has(particle.type)) return true;
-    if (particle.type === 'aura' && particle.size >= PARTICLE_LOD.cheapAuraSize) return true;
+    const particleType = 'type' in particle ? particle.type : undefined;
+    if (particleType && PRIORITY_PARTICLE_TYPES.has(particleType)) return true;
+    if (particleType === 'aura' && particle.size >= PARTICLE_LOD.cheapAuraSize) return true;
     return (index % stride) === 0;
 }
 // Maximum number of explosion particles sampled for bloom — caps cost during chaos
@@ -60,6 +77,7 @@ const CAVE_SEED_BASE = 12345;
 const CAVE_SEED_WIDTH_FACTOR = 7;
 const CAVE_SEED_HEIGHT_FACTOR = 13;
 const CAVE_VEIN_COLORS = ['#FF4488', '#44FF88', '#4488FF', '#AA44FF', '#FFAA44'];
+/** @type {import('./types.js').RenderQualityProfileMap} */
 const RENDER_QUALITY_PROFILES = {
     high: {
         maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50,

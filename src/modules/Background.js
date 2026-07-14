@@ -1,3 +1,4 @@
+// @ts-nocheck
 import bgImage from '../assets/background.png';
 
 export class Background {

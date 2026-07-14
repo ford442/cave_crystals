@@ -1,9 +1,29 @@
+/** @import {
+    CrystalType,
+    ParticleType,
+    CreateParticlesCallback,
+    SporeScoreCallback,
+    CreateShockwaveCallback,
+    CreateTrailCallback,
+    CreateDebrisCallback,
+    CreateChunkCallback,
+    ImpactDustCallback,
+    EnergyRingOptions
+} from './types.js' */
+
 import { COLORS, GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
 import { wasmManager } from './WasmManager.js';
 import { easeOutBack, springStep } from './easing.js';
 
 export class Crystal {
+    /**
+     * @param {number} lane
+     * @param {CrystalType} type
+     * @param {number} height
+     * @param {number} colorIdx
+     * @param {number} [spawnDelay]
+     */
     constructor(lane, type, height, colorIdx, spawnDelay = 0) {
         this.lane = lane;
         this.type = type; // 'top' or 'bottom'
@@ -64,6 +84,10 @@ export class Crystal {
         return 4;
     }
 
+    /**
+     * @param {number} growthRate
+     * @param {number} [timeScale]
+     */
     update(growthRate, timeScale = 1.0) {
         this.height += growthRate;
         this.age += timeScale;
@@ -161,7 +185,18 @@ export class Spore {
         }
     }
 
-    update(topCry, botCry, height, createParticlesCallback, scoreCallback, createShockwaveCallback, createTrailCallback, createDebrisCallback, createChunkCallback, timeScale = 1.0) {
+    update(
+        /** @type {import('./types.js').Crystal | null} */ topCry,
+        /** @type {import('./types.js').Crystal | null} */ botCry,
+        height,
+        /** @type {CreateParticlesCallback} */ createParticlesCallback,
+        /** @type {SporeScoreCallback} */ scoreCallback,
+        /** @type {CreateShockwaveCallback | undefined} */ createShockwaveCallback,
+        /** @type {CreateTrailCallback | undefined} */ createTrailCallback,
+        /** @type {CreateDebrisCallback | undefined} */ createDebrisCallback,
+        /** @type {CreateChunkCallback | undefined} */ createChunkCallback,
+        timeScale = 1.0
+    ) {
         if (!this.active) return;
 
         // Track in-flight age for wobble animation
@@ -258,14 +293,32 @@ export class Spore {
 }
 
 export class Particle {
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * @param {number | null} [vx]
+     * @param {number | null} [vy]
+     * @param {ParticleType} [type]
+     */
     constructor(x, y, color, vx = null, vy = null, type = 'spark') {
         this._init(x, y, color, vx, vy, type);
     }
 
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * @param {number | null} [vx]
+     * @param {number | null} [vy]
+     * @param {import('./types.js').ParticleType} [type]
+     */
     _init(x, y, color, vx = null, vy = null, type = 'spark') {
         this.x = x;
         this.y = y;
+        /** @type {import('./types.js').ParticleType} */
         this.type = type;
+        this.isTrail = false;
 
         if (vx !== null && vy !== null) {
             this.vx = vx;
@@ -386,10 +439,24 @@ export class Particle {
         }
     }
 
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * @param {number | null} [vx]
+     * @param {number | null} [vy]
+     * @param {ParticleType} [type]
+     */
     reset(x, y, color, vx = null, vy = null, type = 'spark') {
         this._init(x, y, color, vx, vy, type);
     }
 
+    /**
+     * @param {number} rendererWidth
+     * @param {number} rendererHeight
+     * @param {ImpactDustCallback | undefined} onBounceCallback
+     * @param {number} [timeScale]
+     */
     update(rendererWidth, rendererHeight, onBounceCallback, timeScale = 1.0) {
         // Apply physics
         this.x += this.vx * timeScale;
@@ -517,6 +584,11 @@ export class TrailParticle {
         this._init(x, y, color, isEnergy);
     }
 
+    /**
+     * @param {number} [timeScale]
+     * @param {number} [rendererWidth]
+     * @param {number} [rendererHeight]
+     */
     update(timeScale = 1.0, rendererWidth = 0, rendererHeight = 0) {
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
@@ -589,6 +661,13 @@ export class Shockwave {
 }
 
 export class EnergyRing {
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} color
+     * @param {number} [comboLevel]
+     * @param {EnergyRingOptions} [options]
+     */
     constructor(x, y, color, comboLevel = 1, options = {}) {
         this.x = x;
         this.y = y;
@@ -708,6 +787,10 @@ export class Launcher {
         this._anticipateTimer = 4; // frames of anticipation before full recoil
     }
 
+    /**
+     * @param {CreateTrailCallback | undefined} createTrailCallback
+     * @param {number} [timeScale]
+     */
     update(createTrailCallback, timeScale = 1.0) {
         this.age += timeScale;
 
@@ -794,6 +877,11 @@ export class SoulParticle {
         this.swayAmplitude = 2.5 + Math.random() * 2.0;
     }
 
+    /**
+     * @param {CreateTrailCallback | undefined} createTrailCallback
+     * @param {number} [timeScale]
+     * @returns {boolean}
+     */
     update(createTrailCallback, timeScale = 1.0) {
         // Inline homing physics to avoid WASM bridge overhead
         const dx = this.targetX - this.x;
@@ -856,7 +944,12 @@ export class DustParticle {
         this.phase = Math.random() * Math.PI * 2;
     }
 
-    update(width, height, shockwaves, timeScale = 1.0) {
+    /**
+     * @param {number} width
+     * @param {number} height
+     * @param {number} [timeScale]
+     */
+    update(width, height, timeScale = 1.0) {
         // Apply velocity
         this.x += this.vx * timeScale;
         this.y += this.vy * timeScale;
