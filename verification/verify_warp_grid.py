@@ -1,35 +1,31 @@
-from playwright.sync_api import sync_playwright
-import time
-import subprocess
+import os
 import sys
+import time
+
+from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, DistServer, report_screenshot
+
 
 def run():
-    # Start server
-    server_process = subprocess.Popen([sys.executable, "-m", "http.server", "8082", "--directory", "dist"])
-    print("Server started on port 8082")
-    time.sleep(2) # Wait for server
-
-    try:
+    with DistServer() as server:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
             context = browser.new_context(viewport={"width": 1280, "height": 800})
             page = context.new_page()
 
-            # Listen for console logs and errors
             page.on("console", lambda msg: print(f"Console: {msg.text}"))
             page.on("pageerror", lambda err: print(f"Page Error: {err}"))
 
-            url = "http://localhost:8082"
-            print(f"Navigating to {url}")
-            page.goto(url)
+            print(f"Navigating to {server.url}")
+            page.goto(server.url)
             page.wait_for_selector("#gameCanvas")
             time.sleep(1)
 
-            # Start Game
             page.click("#startBtn")
             time.sleep(1)
 
-            # Inject Shockwave
             print("Injecting massive shockwave...")
             page.evaluate("""
                 try {
@@ -42,21 +38,14 @@ def run():
                 }
             """)
 
-            # Wait a brief moment for render
             time.sleep(0.5)
 
-            # Check for errors by evaluating a simple math expression that relies on the loop running
-            # If the loop crashed, window.game.state.active might still be true, but the frame count wouldn't increase?
-            # Easier check: just ensure no Page Error was printed.
-
-            # Take screenshot
-            path = "verification/verify_warp_grid.png"
-            page.screenshot(path=path)
-            print(f"Screenshot saved to {path}")
+            screenshot_path = "verification/verify_warp_grid.png"
+            page.screenshot(path=screenshot_path)
+            report_screenshot(screenshot_path)
 
             browser.close()
-    finally:
-        server_process.terminate()
+
 
 if __name__ == "__main__":
     run()

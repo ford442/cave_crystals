@@ -1,17 +1,20 @@
+import os
+import sys
+import time
 
 from playwright.sync_api import sync_playwright
-import time
-import os
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, report_failure, report_screenshot
 
 def run():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
         # Create a new context with a larger viewport
         context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
 
-        # Navigate to the file directly
-        # Ensure we use absolute path
+        # Navigate to the file directly (no server needed for this test)
         cwd = os.getcwd()
         url = f"file://{cwd}/dist/index.html"
         print(f"Navigating to {url}")
@@ -28,8 +31,9 @@ def run():
             time.sleep(1)
 
             # Take screenshot of initial state
-            page.screenshot(path="verification/game_start.png")
-            print("Screenshot saved to verification/game_start.png")
+            screenshot_path = "verification/game_start.png"
+            page.screenshot(path=screenshot_path)
+            report_screenshot(screenshot_path)
 
             # Simulate a click to shoot a spore
             # Center of the screen
@@ -39,12 +43,15 @@ def run():
             time.sleep(0.5)
 
             # Take screenshot of spore
-            page.screenshot(path="verification/game_spore.png")
-            print("Screenshot saved to verification/game_spore.png")
+            screenshot_path = "verification/game_spore.png"
+            page.screenshot(path=screenshot_path)
+            report_screenshot(screenshot_path)
 
         except Exception as e:
             print(f"Error: {e}")
-            page.screenshot(path="verification/error.png")
+            failure_path = "verification/error.png"
+            page.screenshot(path=failure_path)
+            report_failure(failure_path)
 
         browser.close()
 

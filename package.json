@@ -8,7 +8,11 @@
     "asbuild": "npm run asbuild:debug && npm run asbuild:release",
     "dev": "npm run asbuild && vite",
     "build": "npm run asbuild && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:build": "npm run build",
+    "verify:smoke": "python3 verification/verify_juice.py",
+    "verify:visual": "python3 verification/run_all.py",
+    "verify": "npm run verify:build && npm run verify:smoke"
   },
   "keywords": [],
   "author": "",

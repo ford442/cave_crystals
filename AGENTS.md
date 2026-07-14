@@ -123,43 +123,32 @@ npm run asbuild
 
 ## Testing / Verification
 
-The `verification/` directory contains 18 Python scripts using **Playwright** to test game features visually. They fall into three server access patterns:
+The `verification/` directory contains Python scripts using **Playwright** to test game features visually, plus two shared support files:
 
-1. **Direct file access** (for `verify_game.py`):
-   ```python
-   url = f"file://{cwd}/dist/index.html"
-   ```
-2. **Local HTTP server on port 8081** (most scripts):
-   ```python
-   server = subprocess.Popen([sys.executable, "-m", "http.server", "8081", "--directory", "dist"], ...)
-   ```
-3. **Vite dev server on port 5173** (e.g., `verify_gameplay.py`):
-   ```python
-   await page.goto("http://localhost:5173")
-   ```
+- `server.py` — a `DistServer` context manager that starts `python3 -m http.server` over `dist/` on an OS-assigned free port, blocks until it actually answers requests (no fixed `time.sleep` guesswork), and stops it afterward. Also exports `CHROMIUM_ARGS` (`--no-sandbox`, `--disable-dev-shm-usage`, `--disable-gpu`) for reliable headless launches in CI/containers, and `report_screenshot()` / `report_failure()` helpers that print consistently tagged `[screenshot] <path>` / `[failure] <path>` lines.
+- `run_all.py` — discovers and runs every `verify_*.py` script in sequence, printing a pass/fail summary and exiting non-zero on any failure. This backs `npm run verify:visual`.
+
+Every script is self-contained: it starts its own server via `DistServer` (or, for `verify_game.py`, opens `dist/index.html` directly via `file://`) and requires nothing pre-running. Import the helper with `sys.path.insert(0, os.path.dirname(__file__)); from server import ...` since scripts run standalone from the repo root.
 
 Typical test flow:
-1. Launch headless Chromium.
-2. Navigate to the game (file, localhost:8081, or localhost:5173).
-3. Wait for `#gameCanvas` and click `#startBtn`.
+1. `with DistServer() as server:` to serve `dist/`.
+2. Launch headless Chromium with `args=CHROMIUM_ARGS`.
+3. Navigate to `server.url`, wait for `#gameCanvas`, click `#startBtn`.
 4. Inject game state or simulate input via `page.evaluate()` / `page.mouse.click()`.
-5. Take screenshots to `verification/` or assert state values.
+5. Take screenshots to `verification/`, reporting them via `report_screenshot()`.
 
-Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Playwright APIs are used across different scripts.
+Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Playwright APIs are used across different scripts; async scripts call `DistServer().start()` / `.stop()` manually instead of using the `with` block.
 
-### Running a verification script
+**Note**: This environment (and most CI containers) only has `python3` on PATH, not `python` — always invoke scripts with `python3`.
 
-For scripts that use the production build + HTTP server:
+### Running verification
+
 ```bash
-npm run build
-python verification/verify_game_http.py
-```
-
-For scripts that require the Vite dev server:
-```bash
-npm run dev
-# In another terminal:
-python verification/verify_gameplay.py
+npm run build          # or: npm run verify:build
+npm run verify          # build + one fast Playwright smoke test (verify_juice.py)
+npm run verify:smoke    # just the smoke test, assumes dist/ already built
+npm run verify:visual   # run every verification/verify_*.py script, print a summary
+python3 verification/verify_game_http.py   # run any individual script directly
 ```
 
 **Note**: These are visual/integration smoke tests, not unit tests. They verify that effects render correctly by taking screenshots and sometimes inspecting `window.game.state` values.
@@ -245,4 +234,4 @@ python deploy.py
 - **Add a new particle type**: Add the class/type in `src/modules/Entities.js`, update the particle update/render logic in `Game.js` and `Renderer.js`. If it spawns frequently, consider adding it to the `ParticlePool` in `Game.js`.
 - **Add a new WASM function**: Write it in the appropriate `src/assembly/*.ts` file, re-export from `index.ts`, add a wrapper + JS fallback in `src/modules/WasmManager.js`, then call it from `Game.js` or `Entities.js`.
 - **Add a new sound**: Add a method to `SoundManager` in `src/modules/Audio.js` using oscillators and gains.
-- **Add a verification test**: Create a new Python file in `verification/` using the Playwright patterns shown in existing scripts. Match the server pattern to the test's needs (file://, localhost:8081, or localhost:5173).
+- **Add a verification test**: Create a new `verify_*.py` file in `verification/` using the `DistServer` helper from `server.py` (see other scripts for the pattern). It will automatically be picked up by `npm run verify:visual` via `run_all.py`.

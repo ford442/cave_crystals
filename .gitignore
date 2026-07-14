@@ -4,3 +4,4 @@ dist/
 build/
 *.wasm
 *.wat
+__pycache__/

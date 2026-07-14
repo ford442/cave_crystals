@@ -5,36 +5,30 @@ Verification test for enhanced particle & VFX systems:
 - Richer shatter effects
 - Color-specific Amber ember trails
 
-Run from repo root: python verification/verify_vfx_effects.py
+Run from repo root: python3 verification/verify_vfx_effects.py
 """
-from playwright.sync_api import sync_playwright
-import time
 import os
-import subprocess
 import sys
+import time
+
+from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, DistServer, report_screenshot
 
 
 def run():
-    server_process = subprocess.Popen(
-        [sys.executable, "-m", "http.server", "8085", "--directory", "dist"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    print("Server started on port 8085")
-    time.sleep(2)
-
-    try:
+    with DistServer() as server:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
             context = browser.new_context(viewport={"width": 1280, "height": 800})
             page = context.new_page()
 
             console_msgs = []
             page.on("console", lambda msg: console_msgs.append(msg.text))
 
-            url = "http://localhost:8085"
-            print(f"Navigating to {url}")
-            page.goto(url)
+            print(f"Navigating to {server.url}")
+            page.goto(server.url)
             page.wait_for_selector("#gameCanvas", timeout=10000)
             time.sleep(1)
 
@@ -157,7 +151,6 @@ def run():
                 })()
             """)
             print(f"EnergyRing update check: rings queued = {ring_update['rings_before']}")
-            # Energy rings from step 4 should still be present or fading
             assert ring_update["rings_before"] >= 0, "energyRings should be non-negative"
 
             # ----------------------------------------------------------------
@@ -170,7 +163,6 @@ def run():
             page.mouse.click(350, 400)
             time.sleep(1)
 
-            # Snapshot the particle/ring counts after firing
             snapshot = page.evaluate("""
                 ({
                     particles: window.game.state.particles.length,
@@ -183,11 +175,9 @@ def run():
             # ----------------------------------------------------------------
             # 9. Screenshot for visual inspection
             # ----------------------------------------------------------------
-            screenshot_path = os.path.join(
-                os.path.dirname(__file__), "vfx_effects_screenshot.png"
-            )
+            screenshot_path = os.path.join(os.path.dirname(__file__), "vfx_effects_screenshot.png")
             page.screenshot(path=screenshot_path)
-            print(f"Screenshot saved to {screenshot_path}")
+            report_screenshot(screenshot_path)
 
             # ----------------------------------------------------------------
             # 10. Check no console errors were logged
@@ -202,11 +192,6 @@ def run():
             print("\n=== All VFX checks passed! ===")
 
             browser.close()
-
-    finally:
-        server_process.terminate()
-        server_process.wait()
-        print("Server stopped")
 
 
 if __name__ == "__main__":

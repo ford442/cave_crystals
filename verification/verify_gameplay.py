@@ -1,34 +1,40 @@
-
 import asyncio
-from playwright.async_api import async_playwright
 import os
+import sys
+
+from playwright.async_api import async_playwright
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, DistServer, report_screenshot
+
 
 async def run():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+    server = DistServer().start()
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
+            page = await browser.new_page()
 
-        # Adjust URL to your local server
-        await page.goto("http://localhost:5173")
+            await page.goto(server.url)
 
-        # Wait for game to load
-        await page.wait_for_selector("#gameCanvas")
+            await page.wait_for_selector("#gameCanvas")
 
-        # Click start
-        await page.click("#startBtn")
+            await page.click("#startBtn")
 
-        # Wait a bit for gameplay
-        await asyncio.sleep(1)
+            await asyncio.sleep(1)
 
-        # Simulate a click to shoot
-        await page.mouse.click(400, 400)
+            await page.mouse.click(400, 400)
 
-        await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
 
-        # Take screenshot
-        await page.screenshot(path="gameplay.png")
+            screenshot_path = "verification/gameplay.png"
+            await page.screenshot(path=screenshot_path)
+            report_screenshot(screenshot_path)
 
-        await browser.close()
+            await browser.close()
+    finally:
+        server.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(run())

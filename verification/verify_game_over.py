@@ -1,41 +1,48 @@
-
 import asyncio
-from playwright.async_api import async_playwright
 import os
+import sys
+
+from playwright.async_api import async_playwright
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, DistServer, report_screenshot
+
 
 async def run():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+    server = DistServer().start()
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
+            page = await browser.new_page()
 
-        # Adjust URL to your local server
-        await page.goto("http://localhost:5173")
+            await page.goto(server.url)
 
-        # Wait for game to load
-        await page.wait_for_selector("#gameCanvas")
+            await page.wait_for_selector("#gameCanvas")
 
-        # Click start
-        await page.click("#startBtn")
+            await page.click("#startBtn")
 
-        # Wait for gameplay
-        await asyncio.sleep(1)
+            await asyncio.sleep(1)
 
-        # Force Game Over and Trigger Explosion
-        await page.evaluate("""
-            if (window.game) {
-                 // Force a crystal to collide with opposite
-                 window.game.state.crystals[0].height = window.game.renderer.height;
-                 window.game.state.crystals[1].height = window.game.renderer.height;
-            }
-        """)
+            # Force Game Over and Trigger Explosion
+            await page.evaluate("""
+                if (window.game) {
+                     // Force a crystal to collide with opposite
+                     window.game.state.crystals[0].height = window.game.renderer.height;
+                     window.game.state.crystals[1].height = window.game.renderer.height;
+                }
+            """)
 
-        # Wait a split second for the loop to catch it and trigger explosion
-        await asyncio.sleep(0.2)
+            # Wait a split second for the loop to catch it and trigger explosion
+            await asyncio.sleep(0.2)
 
-        # Take screenshot of the explosion
-        await page.screenshot(path="game_over_explosion.png")
+            screenshot_path = "verification/game_over_explosion.png"
+            await page.screenshot(path=screenshot_path)
+            report_screenshot(screenshot_path)
 
-        await browser.close()
+            await browser.close()
+    finally:
+        server.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(run())

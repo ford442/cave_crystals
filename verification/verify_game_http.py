@@ -1,48 +1,48 @@
-
-from playwright.sync_api import sync_playwright
+import os
+import sys
 import time
 
+from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, os.path.dirname(__file__))
+from server import CHROMIUM_ARGS, DistServer, report_failure, report_screenshot
+
+
 def run():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        # Create a new context with a larger viewport
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
-        page = context.new_page()
+    with DistServer() as server:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
+            context = browser.new_context(viewport={"width": 1280, "height": 800})
+            page = context.new_page()
 
-        url = "http://localhost:8081"
-        print(f"Navigating to {url}")
+            print(f"Navigating to {server.url}")
 
-        try:
-            page.goto(url)
-            # Wait for canvas to be present
-            page.wait_for_selector("#gameCanvas")
+            try:
+                page.goto(server.url)
+                page.wait_for_selector("#gameCanvas")
 
-            # Click start button
-            page.click("#startBtn")
+                page.click("#startBtn")
+                time.sleep(1)
 
-            # Wait a bit for game to start
-            time.sleep(1)
+                screenshot_path = "verification/game_start_http.png"
+                page.screenshot(path=screenshot_path)
+                report_screenshot(screenshot_path)
 
-            # Take screenshot of initial state
-            page.screenshot(path="verification/game_start_http.png")
-            print("Screenshot saved to verification/game_start_http.png")
+                page.mouse.click(640, 400)
+                time.sleep(0.5)
 
-            # Simulate a click to shoot a spore
-            # Center of the screen
-            page.mouse.click(640, 400)
+                screenshot_path = "verification/game_spore_http.png"
+                page.screenshot(path=screenshot_path)
+                report_screenshot(screenshot_path)
 
-            # Wait for spore to grow
-            time.sleep(0.5)
+            except Exception as e:
+                print(f"Error: {e}")
+                failure_path = "verification/error_http.png"
+                page.screenshot(path=failure_path)
+                report_failure(failure_path)
 
-            # Take screenshot of spore
-            page.screenshot(path="verification/game_spore_http.png")
-            print("Screenshot saved to verification/game_spore_http.png")
+            browser.close()
 
-        except Exception as e:
-            print(f"Error: {e}")
-            page.screenshot(path="verification/error_http.png")
-
-        browser.close()
 
 if __name__ == "__main__":
     run()
