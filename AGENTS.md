@@ -244,3 +244,12 @@ python deploy.py
 - **Add a new WASM function**: Write it in the appropriate `src/assembly/*.ts` file, re-export from `index.ts`, add a wrapper + JS fallback in `src/modules/WasmManager.js`, then call it from `Game.js` or `Entities.js`.
 - **Add a new sound**: Add a method to `SoundManager` in `src/modules/Audio.js` using oscillators and gains.
 - **Add a verification test**: Create a new `verify_*.py` file in `verification/` using the `DistServer` helper from `server.py` (see other scripts for the pattern). It will automatically be picked up by `npm run verify:visual` via `run_all.py`.
+
+## Cursor Cloud specific instructions
+
+Dependencies are refreshed automatically by the startup update script (`npm install`, plus `playwright` + its Chromium browser for the Python verification scripts). Below are the non-obvious runtime caveats; standard commands live in the Build/Verification sections above.
+
+- **Dev server**: `npm run dev` serves on `http://localhost:5173/` (Vite default) and recompiles WASM before starting. It's a foreground/long-running process — run it in a persistent shell (tmux), not a blocking one-shot.
+- **Playwright CLI is not on PATH**: `pip install playwright` puts the `playwright` script in `~/.local/bin`, which isn't on PATH here. Always invoke it as `python3 -m playwright ...` (e.g. `python3 -m playwright install chromium`). Likewise the verification scripts use `python3`, never `python`.
+- **Verification needs a build first**: `npm run verify:smoke` and `npm run verify:visual` run headless Chromium against `dist/`, so run `npm run build` (or `npm run verify:build`) beforehand or they'll test a stale/missing bundle. `npm run verify` bundles the build + smoke test together. Each script starts its own static server on a free port, so nothing needs to be running first.
+- **Everything runs locally, no secrets/services**: The game is a static client-side app with no backend, database, or credentials. `deploy.py` (SFTP upload) is for production deploys only and is not part of dev setup — do not run it.
