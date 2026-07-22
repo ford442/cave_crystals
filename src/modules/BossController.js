@@ -300,16 +300,13 @@ export class BossController {
                 this.timerMs = 0;
                 this.phaseStep = 'surge';
                 this.telegraphProgress = 1;
-                this._surgeFired = false;
+                this._surgeFired = true;
+                result.justSurged = true;
             }
             return result;
         }
 
         if (this.phaseStep === 'surge') {
-            if (!this._surgeFired) {
-                this._surgeFired = true;
-                result.justSurged = true;
-            }
             if (this.timerMs >= phase.surgeMs) {
                 this.timerMs = 0;
                 this.phaseStep = 'vulnerable';

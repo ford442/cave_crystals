@@ -1,7 +1,7 @@
 // @ts-check
 /** @import { BossDefinition, BossPhaseDefinition } from './types.js' */
 
-import bossesData from '../data/bosses.json';
+import bossesData from '../data/bosses.json' with { type: 'json' };
 
 /**
  * @returns {BossDefinition[]}

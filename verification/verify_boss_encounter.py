@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
 from screenshot_utils import advance, capture_deterministic_screenshot, new_deterministic_page
-from server import CHROMIUM_ARGS, DistServer, report_screenshot
+from server import CHROMIUM_ARGS, DistServer
 
 
 def run():
