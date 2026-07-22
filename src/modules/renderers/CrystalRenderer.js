@@ -1,4 +1,4 @@
-import { COLORS } from '../RendererConstants.js';
+import { DEFAULT_PALETTE, drawColorShape } from '../ColorPalettes.js';
 /** @import { RendererHost } from './RendererHost.js' */
 
 export class CrystalRenderer {
@@ -24,8 +24,15 @@ export class CrystalRenderer {
             // Apply elastic scale (Juice!)
             const width = this.host.laneWidth * 0.8 * (c.scaleX || 1.0);
             const heightScale = c.scaleY || 1.0;
+
+            const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
+            const isHighDetail = profile.crystalDetail === 'high' && !useSolidFill;
+            const growthPush = isHighDetail
+                ? Math.min(0.04, Math.max(-0.012, (c.displayHeightVel || 0) * 0.014))
+                : 0;
+            const animHeightScale = heightScale * (1 + growthPush);
         
-            const col = COLORS[c.colorIdx];
+            const col = (this.host.activePalette || DEFAULT_PALETTE)[c.colorIdx];
             const seed = c.shapeSeed;
         
             let fillColor = col.hex;
@@ -38,15 +45,6 @@ export class CrystalRenderer {
                 fillColor = 'rgba(0, 255, 255, 0.7)';
                 strokeColor = 'rgba(0, 255, 255, 0.7)';
             }
-        
-            // Perf: use solid fill instead of gradients when particle chaos is high
-            const useSolidFill = particleCount > 40 || profile.crystalDetail === 'low';
-
-            const isHighDetail = profile.crystalDetail === 'high' && !useSolidFill;
-            const growthPush = isHighDetail
-                ? Math.min(0.04, Math.max(-0.012, (c.displayHeightVel || 0) * 0.014))
-                : 0;
-            const animHeightScale = heightScale * (1 + growthPush);
         
             // Compute lighting context: direction and intensity from nearby bright objects
             const crystalCenterY = c.type === 'top' ? (renderHeight * animHeightScale) / 2 : this.host.height - (renderHeight * animHeightScale) / 2;
@@ -646,6 +644,31 @@ export class CrystalRenderer {
             }
         
             this.host.ctx.shadowBlur = 0;
+
+            if (!colorOverride) {
+                const paletteCol = (this.host.activePalette || DEFAULT_PALETTE)[c.colorIdx];
+                const glyphSize = this.host.colorBlindMode ? 16 : 10;
+                const tipY = c.type === 'top'
+                    ? shakeY + (renderHeight * animHeightScale)
+                    : shakeY + (this.host.height - renderHeight * animHeightScale);
+                drawColorShape(
+                    this.host.ctx,
+                    paletteCol.shape,
+                    xCenter,
+                    tipY,
+                    glyphSize,
+                    '#ffffff',
+                    this.host.colorBlindMode ? paletteCol.hex : 'rgba(255,255,255,0.2)'
+                );
+                if (paletteCol.glyph) {
+                    this.host.ctx.fillStyle = '#031018';
+                    this.host.ctx.font = `bold ${Math.max(8, glyphSize * 0.55)}px monospace`;
+                    this.host.ctx.textAlign = 'center';
+                    this.host.ctx.textBaseline = 'middle';
+                    this.host.ctx.fillText(paletteCol.glyph, xCenter, tipY);
+                }
+            }
+
             if (distortionApplied) this.host.ctx.restore();
         }
 
@@ -667,6 +690,7 @@ export class CrystalRenderer {
 
         drawScanlines(intensity) {
             if (!this.host.ctx) return;
+            intensity *= (this.host.motionScale ?? 1);
             const prevComposite = this.host.ctx.globalCompositeOperation;
             const prevAlpha = this.host.ctx.globalAlpha;
             const prevFillStyle = this.host.ctx.fillStyle;
@@ -681,6 +705,8 @@ export class CrystalRenderer {
 
         drawGlitch(intensity) {
             if (!this.host.ctx) return;
+            intensity *= (this.host.motionScale ?? 1);
+            if (intensity <= 0.01) return;
             const numGlitches = Math.floor(intensity * 10);
         
             // Regenerate rects only when intensity changes significantly or count changes

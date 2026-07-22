@@ -1,21 +1,32 @@
+// @ts-check
 /** @import { GameState, QualityMode } from './types.js' */
 
-import { COLORS, GAME_CONFIG } from './Constants.js';
+import { GAME_CONFIG } from './Constants.js';
 import { SoundManager } from './Audio.js';
-import { Crystal, Spore, Particle, TrailParticle, Shockwave,
-         FloatingText, Launcher, DustParticle, ParticlePool, EnergyRing } from './Entities.js';
+import { DEFAULT_PALETTE } from './ColorPalettes.js';
+import { SettingsManager } from './SettingsManager.js';
+import { SaveManager } from './SaveManager.js';
+import { InputManager } from './InputManager.js';
+import { Crystal, Spore, Particle, TrailParticle,
+         Launcher, DustParticle, ParticlePool } from './Entities.js';
 import { Renderer } from './Renderer.js';
 import { Background } from './Background.js';
 import { wasmManager } from './WasmManager.js';
-import { installGameRuntime } from './GameRuntime.js';
+import { particleWorkerBridge } from './ParticleWorkerBridge.js';
+import { registerSystems } from './systems/registerSystems.js';
+import { ProgressionManager } from './ProgressionManager.js';
+import { PowerUpManager } from './PowerUpManager.js';
+import { POWER_UPS, POWER_UP_TYPES } from './PowerUpDefinitions.js';
+import { TutorialManager } from './TutorialManager.js';
+import * as gameplayRng from './GameplayRng.js';
+import { ReplayRecorder } from './ReplayRecorder.js';
+import { ReplayPlayer } from './ReplayPlayer.js';
+import { parseReplayFile } from './replayFormat.js';
 
 /**
- * Core game controller. Frame loop methods are mixed in from GameRuntime.js.
+ * Core game controller composed from explicit subsystems in ./systems/.
  *
- * @property {number} [_smoothedFps]
- * @property {number} [_qualityCooldownUntil]
- * @property {number} [_fpsLastTime]
- * @property {number} [_fpsFrames]
+ * @property {ReturnType<typeof registerSystems>} systems
  * @property {number} [_lastScoreScale]
  * @property {() => void} [_boundLoop]
  * @property {import('./types.js').CreateParticlesCallback} [_boundCreateParticles]
@@ -27,11 +38,16 @@ import { installGameRuntime } from './GameRuntime.js';
  * @property {() => void} [_boundUpdateUI]
  * @property {import('./types.js').SporeScoreCallback} [_boundOnSporeScore]
  * @property {import('./Entities.js').Particle[]} [_ambientBatch]
- * @property {import('./Entities.js').TrailParticle[]} [_trailUpdateBatch]
+ * @property {import('./InputManager.js').InputManager} input
+ * @property {SettingsManager} settings
+ * @property {SaveManager} save
+ * @property {number} [_sessionBestCombo]
  */
 export class Game {
     constructor() {
         this.background = new Background();
+        this.progression = new ProgressionManager();
+        this.powerUps = new PowerUpManager();
         this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
         this.renderer = new Renderer(this.canvas);
         this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
@@ -47,12 +63,36 @@ export class Game {
             startBtn: document.getElementById('startBtn'),
             restartBtn: document.getElementById('restartBtn'),
             fps: document.getElementById('fpsCounter'),
-            qualitySelect: /** @type {HTMLSelectElement | null} */ (document.getElementById('qualitySelect'))
+            objectiveLabel: document.getElementById('objectiveLabel'),
+            objectiveProgress: document.getElementById('objectiveProgress'),
+            objectiveBar: document.getElementById('objectiveBar'),
+            levelName: document.getElementById('levelName'),
+            gameOverTitle: document.getElementById('gameOverTitle'),
+            powerUpHud: document.getElementById('powerUpHud'),
+            powerUpActivateBtn: /** @type {HTMLButtonElement | null} */ (document.getElementById('powerUpActivateBtn')),
+            pause: document.getElementById('pauseScreen'),
+            resumeBtn: /** @type {HTMLButtonElement | null} */ (document.getElementById('resumeBtn')),
+            highScoreVal: document.getElementById('highScoreVal'),
+            bestComboVal: document.getElementById('bestComboVal'),
+            accuracyVal: document.getElementById('accuracyVal'),
         };
+
+        this.save = new SaveManager();
+        this.settings = new SettingsManager(this.save);
+        this.tutorial = new TutorialManager(this, this.save);
+        SoundManager.onPersist((audio) => {
+            this.save.updateSettings({ audio });
+            this.save.save();
+            this.settings.syncAllUI();
+        });
+        this.input = new InputManager();
+        /** @type {number} */
+        this._suppressMouseUntil = 0;
 
         /** @type {import('./types.js').GameState} */
         this.state = {
             active: false,
+            paused: false,
             score: 0,
             level: 1,
             lastTime: 0,
@@ -104,7 +144,10 @@ export class Game {
                 energyRingCount: 0,
                 sporeCount: 0,
                 particleDrawMs: 0,
-                particleUpdateMs: 0
+                particleUpdateMs: 0,
+                particleIntegratorPath: 'idle',
+                particleWorkerMs: 0,
+                particleWorkerBacklog: 0,
             },
             adaptiveOverrides: {
                 particleStrideBoost: 0,
@@ -112,8 +155,20 @@ export class Game {
             },
             laneMap: new Map(), // key: lane, value: { top: crystal, bottom: crystal }
             energyRings: [],
-            envParticles: []
+            envParticles: [],
+            motionScale: 1.0,
+            reducedMotion: false,
+            colorBlindMode: false,
+            colorPalette: DEFAULT_PALETTE,
+            gameClockMs: 0,
         };
+
+        this.replay = {
+            recorder: new ReplayRecorder(),
+            player: new ReplayPlayer(),
+        };
+
+        this._sessionBestCombo = 0;
 
         // Object pools for high-frequency particles (reduces GC pressure)
         this.particlePool = new ParticlePool(
@@ -127,11 +182,21 @@ export class Game {
             300
         );
 
-        // Initialize WASM asynchronously
+        this.systems = registerSystems(this);
+
+        // Initialize WASM and particle worker asynchronously
         wasmManager.init().then(() => {
             console.log('WASM module initialization complete');
         }).catch(err => {
             console.warn('WASM initialization failed, using JavaScript fallback:', err);
+        });
+
+        particleWorkerBridge.init().then((ok) => {
+            if (ok) {
+                console.log('Particle worker initialization complete');
+            }
+        }).catch(() => {
+            console.warn('Particle worker unavailable, using main-thread integration');
         });
 
         // Cache bound callbacks to eliminate per-frame function allocations
@@ -149,23 +214,30 @@ export class Game {
         this._trailUpdateBatch = new Array(512);
 
         /** @type {number | undefined} */
-        this._smoothedFps = undefined;
-        /** @type {number | undefined} */
-        this._qualityCooldownUntil = undefined;
-        /** @type {number | undefined} */
-        this._fpsLastTime = undefined;
-        /** @type {number | undefined} */
-        this._fpsFrames = undefined;
-        /** @type {number | undefined} */
         this._lastScoreScale = undefined;
 
         if (typeof window !== 'undefined' && window.__DEV_PERF__) {
             this.state.devPerfOverlay = true;
         }
 
+        this.settings.load();
+        SoundManager.init(this.settings.get().audio);
         this.bindEvents();
+        this.settings.bindUI({
+            startRoot: document.getElementById('startScreen'),
+            pauseRoot: document.getElementById('pauseScreen'),
+        }, this);
+        this.settings.apply(this);
         this.resize();
         requestAnimationFrame(this._boundLoop);
+    }
+
+    /**
+     * @param {number} value
+     * @returns {number}
+     */
+    _motion(value) {
+        return value * (this.state.motionScale ?? 1);
     }
 
     /**
@@ -174,39 +246,50 @@ export class Game {
      */
     toggleDevPerfOverlay(force) {
         this.state.devPerfOverlay = typeof force === 'boolean' ? force : !this.state.devPerfOverlay;
-        this._updateFpsHud();
+        this.systems.quality.updateFpsHud();
         return this.state.devPerfOverlay;
-    }
-
-    _updateFpsHud() {
-        if (!this.ui.fps) return;
-        const m = this.state.perfMetrics;
-        const qualityLabel = this.state.renderQuality.toUpperCase()
-            + (this.state.qualityMode === 'auto' ? ' AUTO' : this.state.qualityMode === 'dev' ? ' DEV' : '');
-        if (this.state.devPerfOverlay) {
-            this.ui.fps.textContent = `${Math.round(m.smoothedFps || m.fps || 0)} FPS · ${m.particleCount}/${m.particleLimit} · ${qualityLabel}`;
-            this.ui.fps.classList.add('dev-active');
-        } else if (m.fps) {
-            this.ui.fps.textContent = `${m.fps} FPS · ${qualityLabel}`;
-            this.ui.fps.classList.remove('dev-active');
-        }
     }
 
     bindEvents() {
         this.ui.startBtn.addEventListener('click', () => this.startGame());
         this.ui.restartBtn.addEventListener('click', () => this.resetGame());
-        if (this.ui.qualitySelect) {
-            this.ui.qualitySelect.addEventListener('change', () => this.setQualityMode(/** @type {QualityMode} */ (this.ui.qualitySelect.value)));
+        if (this.ui.resumeBtn) {
+            this.ui.resumeBtn.addEventListener('click', () => this.resumeGame());
         }
         window.addEventListener('resize', () => this.resize());
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         window.addEventListener('mousedown', (e) => this.handleInput(e));
-        window.addEventListener('touchstart', (e) => this.handleTouch(e));
+        this.canvas.addEventListener('touchstart', (e) => this.handleTouch(e), { passive: false });
         window.addEventListener('keydown', (e) => {
+            if (this.state.active && !this.state.paused) {
+                const gameKeys = ['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'Enter'];
+                if (gameKeys.includes(e.code)) {
+                    e.preventDefault();
+                }
+            }
+            if (e.code === 'Escape' && !e.repeat) {
+                this.togglePause();
+            }
             if (e.code === 'KeyP' && !e.repeat) {
                 this.toggleDevPerfOverlay();
             }
+            if (e.code === 'KeyE' && !e.repeat && this.state.active) {
+                this.activateHeldPowerUp();
+            }
+            const devMode = import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev');
+            if (devMode && e.code === 'KeyR' && e.ctrlKey && e.shiftKey && !e.repeat) {
+                e.preventDefault();
+                if (this.replay.recorder.isRecording()) {
+                    this.replay.recorder.download('session.ccreplay', {
+                        finalScore: this.state.score,
+                        tolerance: 0,
+                    });
+                }
+            }
         });
+        if (this.ui.powerUpActivateBtn) {
+            this.ui.powerUpActivateBtn.addEventListener('click', () => this.activateHeldPowerUp());
+        }
     }
 
     resize() {
@@ -214,12 +297,84 @@ export class Game {
         this.launcher.laneWidth = this.renderer.laneWidth;
         this.launcher.rendererHeight = this.renderer.height;
         this.launcher.y = this.renderer.height / 2;
+        this.tutorial.updateLayout();
     }
 
     startGame() {
-        SoundManager.init();
-        this.setQualityMode(/** @type {QualityMode} */ (this.ui.qualitySelect ? this.ui.qualitySelect.value : this.state.qualityMode));
+        if (typeof window !== 'undefined' && window.__pendingReplay__) {
+            const replay = parseReplayFile(window.__pendingReplay__);
+            window.__pendingReplay__ = undefined;
+            this.replay.player.load(replay);
+            this.replay.player.start(this);
+            return;
+        }
+        this._beginSession(this._buildReplayConfigFromSettings(), this._createRunSeed(), {
+            skipTutorial: false,
+            record: true,
+        });
+    }
+
+    /**
+     * @param {import('./replayFormat.js').ReplayConfig} config
+     * @param {number} seed
+     */
+    startGameFromReplay(config, seed) {
+        this._beginSession(config, seed, {
+            skipTutorial: true,
+            record: false,
+        });
+    }
+
+    /** @returns {import('./replayFormat.js').ReplayConfig} */
+    _buildReplayConfigFromSettings() {
+        const settings = this.settings.get();
+        return {
+            gameMode: /** @type {import('./types.js').GameMode} */ (settings.gameMode),
+            graphics: settings.graphics,
+            levelIndex: this.progression.levelIndex,
+        };
+    }
+
+    /** @returns {number} */
+    _createRunSeed() {
+        return Math.floor(Math.random() * 0xffffffff);
+    }
+
+    /**
+     * @param {import('./replayFormat.js').ReplayConfig} config
+     * @param {number} seed
+     * @param {{ skipTutorial: boolean, record: boolean }} options
+     */
+    _beginSession(config, seed, options) {
+        this.save.updateSettings({
+            gameMode: config.gameMode,
+            graphics: config.graphics,
+        });
+        SoundManager.applySettings(this.settings.get().audio);
+        SoundManager.startSession();
+        this.systems.quality.setQualityMode(config.graphics);
+
+        gameplayRng.setGameplaySeed(seed);
+        wasmManager.setGameplaySeed(seed);
+        this.progression.setRng(gameplayRng.next);
+        this.powerUps.setRng(gameplayRng.next);
+        this.systems.collision.setGameplayContext(
+            this.progression.getSpawnConfig().colorCount,
+            gameplayRng.next
+        );
+
+        this.save.recordGameStart();
+        this._sessionBestCombo = 0;
+        this.progression.reset();
+        this.progression.setMode(config.gameMode);
+        if (config.levelIndex > 0) {
+            this.progression.levelIndex = Math.min(config.levelIndex, 4);
+        }
+        this.powerUps.reset();
+
         this.state.active = true;
+        this.state.paused = false;
+        this.state.gameClockMs = 0;
         this.state.score = 0;
         this.state.level = 1;
         this.state.growthMultiplier = 1;
@@ -241,7 +396,6 @@ export class Game {
         this.state.dustParticles = [];
         this.state.energyRings = [];
         this.state.envParticles = [];
-        this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
         this.state.impactFlash = 0;
 
         // Spawn Atmospheric Dust
@@ -252,25 +406,90 @@ export class Game {
             this.state.dustParticles.push(new DustParticle(x, y));
         }
 
+        this.settings.apply(this);
+
         this.ui.start.classList.add('hidden');
         this.ui.gameOver.classList.add('hidden');
+        if (this.ui.pause) {
+            this.ui.pause.classList.add('hidden');
+        }
+        SoundManager.setMusicDuck(1);
+        if (this.ui.gameOverTitle) {
+            this.ui.gameOverTitle.textContent = 'GAME OVER';
+        }
 
+        this.beginCurrentLevel();
+
+        if (options.record) {
+            this.replay.recorder.onStart(seed, config);
+        } else {
+            this.replay.recorder.stop();
+        }
+
+        if (!options.skipTutorial && this.tutorial.shouldRun()) {
+            this.tutorial.start();
+        }
+    }
+
+    beginCurrentLevel() {
+        this.progression.beginLevel(this.state.score);
+        this.applyLevelConfig();
+        this.systems.collision.setGameplayContext(
+            this.progression.getSpawnConfig().colorCount,
+            gameplayRng.next
+        );
+        this.state.nextSporeColorIdx = this.progression.pickRandomColorIndex();
+        this.state.crystals = [];
+        this.state.spores = [];
+        this.updateLaneMap();
         this.updateUI();
+        this.updatePowerUpHud();
         this.initCrystals();
+    }
+
+    applyLevelConfig() {
+        const spawn = this.progression.getSpawnConfig();
+        GAME_CONFIG.lanes = spawn.lanes;
+        this.resize();
+        this.state.level = this.progression.isEndless()
+            ? 1
+            : /** @type {import('./types.js').LevelDefinition} */ (this.progression.getActiveConfig()).id;
+    }
+
+    initCrystals() {
+        const spawn = this.progression.getSpawnConfig();
+        for (let i = 0; i < spawn.lanes; i++) {
+            const delay = i * 100;
+            const height = spawn.heightMin + gameplayRng.nextRange(0, spawn.heightMax - spawn.heightMin);
+            const colorIdx = gameplayRng.nextInt(spawn.colorCount);
+            this.state.crystals.push(new Crystal(i, 'top', height, colorIdx, delay));
+            this.state.crystals.push(new Crystal(i, 'bottom', height, colorIdx, delay));
+        }
+        this.updateLaneMap();
     }
 
     resetGame() {
         this.startGame();
     }
 
-    initCrystals() {
-        for (let i = 0; i < GAME_CONFIG.lanes; i++) {
-            // JUICE: Staggered spawn delay for wave effect
-            const delay = i * 100;
-            this.state.crystals.push(new Crystal(i, 'top', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
-            this.state.crystals.push(new Crystal(i, 'bottom', 20 + Math.random() * 60, Math.floor(Math.random() * COLORS.length), delay));
+    togglePause() {
+        if (!this.state.active) return;
+        if (this.ui.gameOver && !this.ui.gameOver.classList.contains('hidden')) return;
+
+        this.state.paused = !this.state.paused;
+        if (this.state.paused) {
+            if (this.ui.pause) this.ui.pause.classList.remove('hidden');
+            SoundManager.setMusicDuck(0.7);
+        } else {
+            this.resumeGame();
         }
-        this.updateLaneMap();
+    }
+
+    resumeGame() {
+        if (!this.state.active) return;
+        this.state.paused = false;
+        if (this.ui.pause) this.ui.pause.classList.add('hidden');
+        SoundManager.setMusicDuck(1);
     }
 
     updateLaneMap() {
@@ -283,298 +502,219 @@ export class Game {
         });
     }
 
+    /**
+     * @param {number} lane
+     * @param {{ fromReplay?: boolean }} [options]
+     */
+    setTargetLane(lane, options = {}) {
+        if (this.replay.player.isActive() && !options.fromReplay) return;
+        const clamped = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
+        if (clamped === this.launcher.targetLane) return;
+        this.launcher.setTargetLane(clamped);
+        if (!options.fromReplay) {
+            this.replay.recorder.onAim(this, clamped);
+        }
+    }
+
     handleMouseMove(e) {
-        if (!this.state.active) return;
+        if (!this.state.active || this.replay.player.isActive()) return;
         const lane = Math.floor(e.clientX / this.renderer.laneWidth);
-        const targetLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
-        this.launcher.setTargetLane(targetLane);
+        this.setTargetLane(lane);
     }
 
     handleInput(e) {
-        if (!this.state.active) return;
+        if (!this.state.active || this.replay.player.isActive()) return;
+        if (performance.now() < this._suppressMouseUntil) {
+            e.preventDefault();
+            return;
+        }
         this.shootSpore();
     }
 
     handleTouch(e) {
-        if (!this.state.active) return;
-        const touchX = e.touches[0].clientX;
+        if (!this.state.active || this.replay.player.isActive()) return;
+        const touch = e.changedTouches[0] || e.touches[0];
+        if (!touch) return;
+
+        e.preventDefault();
+        this._suppressMouseUntil = performance.now() + 500;
+
+        const touchX = touch.clientX;
         const lane = Math.floor(touchX / this.renderer.laneWidth);
-        const targetLane = Math.min(Math.max(0, lane), GAME_CONFIG.lanes - 1);
-        this.launcher.setTargetLane(targetLane);
+        this.setTargetLane(lane);
         this.shootSpore();
     }
 
-    shootSpore() {
+    /**
+     * @param {{ fromReplay?: boolean }} [options]
+     */
+    shootSpore(options = {}) {
+        if (!this.state.active || this.state.paused) return;
+        if (this.replay.player.isActive() && !options.fromReplay) return;
+        this.save.recordShot();
         SoundManager.shoot();
         this.launcher.fire();
 
         const colorIdx = this.state.nextSporeColorIdx;
+        const modifiers = this.powerUps.consumeShotModifiers();
+        const m = this.state.motionScale;
 
-        // Use launcher's current logical lane for the spore
         const lane = this.launcher.targetLane;
-
-        // Spawn spore at launcher's current visual position (juicy!)
         const x = this.launcher.x;
         const y = this.launcher.y;
 
-        // JUICE: Recoil Screen Kick
-        this.state.kickY = 15; // Kick screen down
-        this.state.shake = Math.max(this.state.shake, 5); // Add slight random shake too
+        this.state.kickY = 15 * m;
+        this.state.shake = Math.max(this.state.shake, 5 * m);
 
         // Visual fluff: Muzzle flash particles
-        this.createParticles(x, y, '#fff', 10);
+        const flashColor = modifiers.rainbow ? '#ffffff' : '#fff';
+        this.createParticles(x, y, flashColor, modifiers.rainbow ? 18 : 10);
 
-        this.state.spores.push(new Spore(x, y, lane, colorIdx));
+        this.state.spores.push(new Spore(x, y, lane, colorIdx, modifiers));
+        if (modifiers.rainbow) {
+            SoundManager.powerUpActivate();
+            this.createFloatingText(x, y - 20, 'RAINBOW!', '#ffffff', 1.4);
+        }
 
-        this.state.nextSporeColorIdx = Math.floor(Math.random() * COLORS.length);
+        if (!options.fromReplay) {
+            this.replay.recorder.onFire(this);
+        }
+
+        this.state.nextSporeColorIdx = this.progression.pickRandomColorIndex();
         this.updateUI();
     }
 
+    /** @param {string} typeId */
+    grantPowerUp(typeId) {
+        const def = POWER_UPS[typeId];
+        if (!def || !this.powerUps.grant(typeId)) return;
+
+        SoundManager.powerUpPickup();
+        const cx = this.renderer.width / 2;
+        const cy = this.renderer.height * 0.35;
+        this.createFloatingText(cx, cy, def.name.toUpperCase(), def.color, 1.6);
+        this.createParticles(cx, cy, def.color, 24);
+        this.createShockwave(cx, cy, def.color);
+        this.systems.juice.addEnergyRing(cx, cy, def.color, 2);
+        this.updatePowerUpHud();
+    }
+
+    /**
+     * @param {{ fromReplay?: boolean }} [options]
+     */
+    activateHeldPowerUp(options = {}) {
+        if (!this.state.active) return;
+        if (this.replay.player.isActive() && !options.fromReplay) return;
+        const lane = this.launcher.targetLane;
+        const result = this.powerUps.activateHeld(lane, this.state.crystals, POWER_UP_TYPES.LANE_SHOCKWAVE);
+        if (!result) return;
+
+        const def = POWER_UPS[result.typeId];
+        const laneX = (lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
+        const laneY = this.renderer.height / 2;
+
+        SoundManager.powerUpActivate();
+        this.createShockwave(laneX, laneY, def.color);
+        this.systems.juice.addEnergyRing(laneX, laneY, def.color, 3);
+        this.createParticles(laneX, laneY, def.color, 30);
+        this.createFloatingText(laneX, laneY - 40, 'SHOCKWAVE!', def.color, 2.0);
+        const m = this.state.motionScale;
+        this.state.shake = Math.max(this.state.shake, 20 * m);
+        this.state.impactFlash = 0.4 * m;
+        this.state.impactFlashColor = def.color;
+        if (!options.fromReplay) {
+            this.replay.recorder.onPowerUp(this);
+        }
+        this.updatePowerUpHud();
+    }
+
+    updatePowerUpHud() {
+        if (!this.ui.powerUpHud) return;
+        const slots = this.powerUps.getHudSlots();
+        this.ui.powerUpHud.innerHTML = slots.map(slot => {
+            const timerHtml = slot.remainingMs != null && slot.durationMs
+                ? `<div class="powerup-timer"><div class="powerup-timer-fill" style="width:${Math.round((slot.remainingMs / slot.durationMs) * 100)}%"></div></div>`
+                : '';
+            const countHtml = slot.count > 1 ? `<span class="powerup-count">x${slot.count}</span>` : '';
+            return `<div class="powerup-slot" data-type="${slot.typeId}" style="--powerup-color:${slot.color}">
+                <span class="powerup-icon">${slot.icon}</span>
+                <span class="powerup-label">${slot.label}</span>
+                ${countHtml}
+                ${timerHtml}
+            </div>`;
+        }).join('');
+
+        if (this.ui.powerUpActivateBtn) {
+            const showActivate = this.powerUps.getHeldCount(POWER_UP_TYPES.LANE_SHOCKWAVE) > 0;
+            this.ui.powerUpActivateBtn.classList.toggle('hidden', !showActivate);
+        }
+    }
+
     createImpactDust(x, y, color) {
-        // Tiny short lived particles
-        this.createParticles(x, y, color, 3, -Math.PI/2, 2.0, 'spark');
+        return this.systems.juice.createImpactDust(x, y, color);
     }
 
     /** @param {import('./types.js').Crystal} crystal */
     createCrystalAura(crystal) {
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        if (this.state.particles.length >= profile.maxParticles) return;
-
-        const x = (crystal.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2) + (crystal.shakeX || 0);
-        const tipY = crystal.type === 'top' ? crystal.height : this.renderer.height - crystal.height;
-        const spread = crystal.isCritical ? 28 : 14;
-        const px = x + (Math.random() - 0.5) * spread;
-        const py = tipY + (Math.random() - 0.5) * spread;
-
-        const color = COLORS[crystal.colorIdx].hex;
-        this.state.particles.push(this.particlePool.acquire(px, py, color, null, null, 'aura'));
-
-        if (crystal.isCritical && Math.random() < 0.4 && this.state.particles.length < profile.maxParticles) {
-            const px2 = x + (Math.random() - 0.5) * spread * 1.5;
-            const py2 = tipY + (Math.random() - 0.5) * spread * 1.5;
-            this.state.particles.push(this.particlePool.acquire(px2, py2, color, null, null, 'aura'));
-        }
+        return this.systems.juice.createCrystalAura(crystal);
     }
 
-    /**
-     * @param {number} x
-     * @param {number} y
-     * @param {string} color
-     * @param {number} combo
-     */
     createMatchBurst(x, y, color, combo) {
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        const qualityScale = this.getQualityScale();
-        const maxParticles = profile.maxParticles;
-
-        // Energy ring (always) - scales with combo
-        this.state.energyRings.push(new EnergyRing(x, y, color, combo));
-
-        // JUICE: Fast flash ring for instant impact pop (medium+)
-        if (profile.crystalDetail !== 'low') {
-            this.state.energyRings.push(new EnergyRing(x, y, color, 1, { flash: true }));
-        }
-
-        // Second white ring on high combo
-        if (combo > 3) {
-            this.state.energyRings.push(new EnergyRing(x, y, '#ffffff', 1));
-        }
-
-        // JUICE: Color-matched spark burst — cheap, short-lived, reads on screenshots
-        if (profile.crystalDetail !== 'low') {
-            this.createImpactSparks(x, y, color, 3 + Math.min(combo, 6));
-        }
-
-        // Dissolving sparkle particles in a spiral pattern
-        const dissolveCount = Math.floor((8 + combo * 2) * qualityScale);
-        for (let i = 0; i < dissolveCount; i++) {
-            if (this.state.particles.length >= maxParticles) break;
-            const vx = wasmManager.getSpiralVx(i, dissolveCount, 3.5, 1.5);
-            const vy = wasmManager.getSpiralVy(i, dissolveCount, 3.5, 1.5);
-            this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, 'aura'));
-        }
-
-        // Rainbow starburst on high combo (>= 5), high-quality only
-        if (combo >= 5 && profile.crystalDetail === 'high') {
-            for (let i = 0; i < COLORS.length; i++) {
-                if (this.state.particles.length >= maxParticles) break;
-                const angle = (i / COLORS.length) * Math.PI * 2;
-                const speed = 6 + Math.random() * 3;
-                const vx = Math.cos(angle) * speed;
-                const vy = Math.sin(angle) * speed;
-                this.state.particles.push(this.particlePool.acquire(x, y, COLORS[i].hex, vx, vy, 'aura'));
-            }
-        }
+        return this.systems.juice.createMatchBurst(x, y, color, combo);
     }
 
     createImpactSparks(x, y, color, count = 4) {
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        if (profile.crystalDetail === 'low') return;
-        const maxParticles = profile.maxParticles;
-        const scaled = Math.max(1, Math.floor(count * this.getQualityScale()));
-        for (let i = 0; i < scaled; i++) {
-            if (this.state.particles.length >= maxParticles) break;
-            const angle = (i / scaled) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-            const speed = 9 + Math.random() * 7;
-            const p = this.particlePool.acquire(
-                x, y, color,
-                Math.cos(angle) * speed,
-                Math.sin(angle) * speed,
-                'spark'
-            );
-            p.maxLife = 0.32 + Math.random() * 0.12;
-            p.life = p.maxLife;
-            p.size = Math.random() * 2.2 + 1.2;
-            this.state.particles.push(p);
-        }
+        return this.systems.juice.createImpactSparks(x, y, color, count);
     }
 
     createParticles(x, y, color, count = 20, angle = null, spread = 1.5, type = 'spark') {
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        const qualityScale = this.getQualityScale();
-        const scaledCount = Math.max(1, Math.floor(count * qualityScale));
-        const speed = type === 'spark' && count < 5 ? 2.0 : 8.0; // Slower for dust
-        const maxParticles = profile.maxParticles;
-        for(let i=0; i<scaledCount; i++) {
-            if (this.state.particles.length >= maxParticles) break;
-            // Inline JS math to avoid WASM wrapper overhead
-            let vx, vy;
-            if (angle !== null) {
-                const fraction = i / scaledCount;
-                const offset = (fraction - 0.5) * spread;
-                const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
-                vx = Math.cos(finalAngle) * speed;
-                vy = Math.sin(finalAngle) * speed;
-            } else {
-                const a = (i / scaledCount) * Math.PI * 2;
-                vx = Math.cos(a) * speed;
-                vy = Math.sin(a) * speed;
-            }
-
-            this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, type));
-        }
+        return this.systems.juice.createParticles(x, y, color, count, angle, spread, type);
     }
 
     createDebris(x, y, color, count = 4, angle = null, spread = 1.0) {
-        const scaledCount = Math.max(1, Math.floor(count * this.getQualityScale()));
-        const maxParticles = this.renderer.getQualityProfile(this.state.renderQuality).maxParticles;
-        for(let i=0; i<scaledCount; i++) {
-             if (this.state.particles.length >= maxParticles) break;
-             let vx, vy;
-             const speed = Math.random() * 5 + 3;
-
-             if (angle !== null) {
-                 const fraction = i / scaledCount;
-                 const offset = (fraction - 0.5) * spread;
-                 const finalAngle = angle + offset + (Math.random() - 0.5) * 0.2;
-                 vx = Math.cos(finalAngle) * speed;
-                 vy = Math.sin(finalAngle) * speed;
-             } else {
-                 // Debris flies out randomly if no angle
-                 const rndAngle = Math.random() * Math.PI * 2;
-                 vx = Math.cos(rndAngle) * speed;
-                 vy = Math.sin(rndAngle) * speed;
-             }
-
-             this.state.particles.push(this.particlePool.acquire(x, y, color, vx, vy, 'debris'));
-        }
+        return this.systems.juice.createDebris(x, y, color, count, angle, spread);
     }
 
     createCrystalChunk(x, y, color, dirY = -1) {
-        // JUICE: Spawn a large chunk that falls and shatters on impact
-        const p = this.particlePool.acquire(x, y, color, null, null, 'chunk');
-        // Initial velocity popping off (up and out or down and out)
-        p.vx = (Math.random() - 0.5) * 4;
-        p.vy = (Math.random() * 5 + 2) * dirY;
-        this.state.particles.push(p);
+        return this.systems.juice.createCrystalChunk(x, y, color, dirY);
     }
 
     createTrailParticle(x, y, color) {
-        const count = this.state.particles.length;
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        const maxP = profile.maxParticles;
-        if (count >= maxP) return;
-        if (count > maxP * 0.85 && Math.random() > 0.4) return;
-        if (count > maxP * 0.7 && Math.random() > 0.65) return;
-        const frameMs = this.state.perfMetrics?.smoothedFrameMs ?? 16.7;
-        if (frameMs > 20 && Math.random() > 0.45) return;
-        if (count > maxP * 0.55 && Math.random() > 0.5) return;
-        // JUICE: Energy wisps on high — same pool, richer draw, no extra spawns
-        const isEnergy = profile.crystalDetail === 'high' && Math.random() < 0.6;
-        this.state.particles.push(this.trailPool.acquire(x, y, color, isEnergy));
+        return this.systems.juice.createTrailParticle(x, y, color);
     }
 
     createShockwave(x, y, color) {
-        this.state.shockwaves.push(new Shockwave(x, y, color));
+        return this.systems.juice.createShockwave(x, y, color);
     }
 
     createFloatingText(x, y, text, color, scale = 1.5) {
-        this.state.floatingTexts.push(new FloatingText(x, y, text, color, scale));
+        return this.systems.juice.createFloatingText(x, y, text, color, scale);
     }
 
     /** @param {string} hexColor */
     triggerResonance(hexColor) {
-        const profile = this.renderer.getQualityProfile(this.state.renderQuality);
-        this.state.crystals.forEach(c => {
-             const cHex = COLORS[c.colorIdx].hex;
-             if (cHex === hexColor) {
-                 // Resonance Pulse
-                 c.velScaleY += 0.5; // Jump up
-                 c.velScaleX -= 0.1; // Squash in slightly
-                 c.flash = 0.8;
-
-                 // Resonance echo aura particles
-                 if (profile.crystalDetail !== 'low') {
-                     const cx = (c.lane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
-                     const tipY = c.type === 'top' ? c.height : this.renderer.height - c.height;
-                     for (let i = 0; i < 3; i++) {
-                         if (this.state.particles.length >= profile.maxParticles) break;
-                         this.state.particles.push(this.particlePool.acquire(
-                             cx + (Math.random() - 0.5) * 24,
-                             tipY + (Math.random() - 0.5) * 24,
-                             hexColor, null, null, 'aura'
-                         ));
-                     }
-                 }
-             }
-        });
+        return this.systems.juice.triggerResonance(hexColor);
     }
 
     calculateShake() {
-        // JUICE: Apply Recoil Kick
-        const kick = this.state.kickY || 0;
-
-        if (this.state.shake > 0 || kick > 0.1) {
-            const dx = (Math.random() - 0.5) * this.state.shake;
-            const dy = (Math.random() - 0.5) * this.state.shake + kick; // Add kick to vertical shake
-            const angle = (Math.random() - 0.5) * (this.state.shake * 0.002); // Subtle rotation
-
-            this.state.shakeOffset.x = dx;
-            this.state.shakeOffset.y = dy;
-            this.state.shakeOffset.angle = angle;
-        } else {
-            this.state.shakeOffset.x = 0;
-            this.state.shakeOffset.y = 0;
-            this.state.shakeOffset.angle = 0;
-        }
+        return this.systems.juice.calculateShake();
     }
 
     triggerLevelUp() {
         SoundManager.levelUp();
+        const m = this.state.motionScale;
 
-        // Time Dilation (Slow Motion)
-        this.state.targetTimeScale = 0.05;
-        this.state.slowMoTimer = 2000;
+        if (m >= 1) {
+            this.state.targetTimeScale = 0.05;
+            this.state.slowMoTimer = 2000;
+        }
 
-        // Massive Shake
-        this.state.shake = 30;
-
-        // Screen Flash (Gold)
-        this.state.impactFlash = 0.8;
+        this.state.shake = 30 * m;
+        this.state.impactFlash = 0.8 * m;
         this.state.impactFlashColor = '#FFD700';
 
-        // Floating Text
-        this.createFloatingText(this.renderer.width / 2, this.renderer.height / 2, "LEVEL UP!", "#FFD700", 3.0);
+        const label = this.progression.isEndless() ? 'LEVEL UP!' : 'LEVEL COMPLETE!';
+        this.createFloatingText(this.renderer.width / 2, this.renderer.height / 2, label, '#FFD700', 3.0);
 
         // Shockwave
         this.createShockwave(this.renderer.width / 2, this.renderer.height / 2, '#FFD700');
@@ -583,8 +723,9 @@ export class Game {
         for (let i = 0; i < 50; i++) {
             const x = this.renderer.width / 2;
             const y = this.renderer.height / 2;
-            const color = COLORS[Math.floor(Math.random() * COLORS.length)].hex;
-            // Use existing particle system
+            const colorCount = this.progression.getSpawnConfig().colorCount;
+            const palette = this.state.colorPalette || DEFAULT_PALETTE;
+            const color = palette[Math.floor(Math.random() * colorCount)].hex;
             this.state.particles.push(this.particlePool.acquire(x, y, color));
         }
 
@@ -594,60 +735,114 @@ export class Game {
         });
     }
 
-    /** @param {number} dt Installed by GameRuntime.js */
-    update(dt) {}
+    handleLevelComplete() {
+        if (this.progression.transitioning) return;
+        this.progression.startTransition(2500);
+        this.triggerLevelUp();
 
-    /** @param {number} dt @param {number} [timeScale] Installed by GameRuntime.js */
-    updateSharedVisuals(dt, timeScale) {}
+        setTimeout(() => {
+            if (this.progression.hasNextLevel()) {
+                this.progression.advanceLevel();
+                this.progression.transitioning = false;
+                this.beginCurrentLevel();
+                return;
+            }
 
-    /** Installed by GameRuntime.js */
-    updateUI() {}
+            this.progression.campaignComplete = true;
+            this.progression.transitioning = false;
+            this.state.active = false;
+            SoundManager.stopSession();
+            this.save.recordGameEnd({
+                score: this.state.score,
+                combo: this._sessionBestCombo || 0,
+            });
+            this.showGameOverStats();
+            if (this.ui.gameOverTitle) {
+                this.ui.gameOverTitle.textContent = 'CAMPAIGN COMPLETE!';
+            }
+            this.ui.finalScore.innerText = String(this.state.score);
+            this.ui.gameOver.classList.remove('hidden');
+        }, 2500);
+    }
 
-    /**
-     * @param {number} points
-     * @param {boolean} isMatch
-     * @param {number} x
-     * @param {number} y
-     * @param {string} color
-     * Installed by GameRuntime.js
-     */
-    _onSporeScore(points, isMatch, x, y, color) {}
+    showGameOverStats() {
+        this.settings.updateGameOverStats();
+    }
 
-    /** @returns {number} Installed by GameRuntime.js */
-    getQualityScale() { return 1; }
+    /** @param {number} dt */
+    update(dt) {
+        return this.systems.loop.update(dt);
+    }
+
+    /** @param {number} dt @param {number} [timeScale] */
+    updateSharedVisuals(dt, timeScale) {
+        return this.systems.loop.updateSharedVisuals(dt, timeScale);
+    }
+
+    updateUI() {
+        return this.systems.loop.updateUI();
+    }
+
+    /** @type {import('./types.js').SporeScoreCallback} */
+    _onSporeScore(points, isMatch, x, y, color) {
+        if (isMatch) {
+            this.replay.recorder.onMilestone(this, {
+                kind: 'match',
+                lane: this.launcher.targetLane,
+                score: this.state.score,
+            });
+        }
+        return this.systems.combo.handleSporeScore(points, isMatch, x, y, color);
+    }
+
+    getQualityScale() {
+        return this.systems.quality.getQualityScale();
+    }
 
     /**
      * @param {number} fps
      * @param {number} lowThreshold
      * @param {number} mediumThreshold
      * @returns {import('./types.js').RenderQualityLevel}
-     * Installed by GameRuntime.js
      */
-    resolveQualityForFps(fps, lowThreshold, mediumThreshold) { return 'high'; }
+    resolveQualityForFps(fps, lowThreshold, mediumThreshold) {
+        return this.systems.quality.resolveQualityForFps(fps, lowThreshold, mediumThreshold);
+    }
 
-    /** @param {QualityMode} [mode] Installed by GameRuntime.js */
-    setQualityMode(mode) {}
+    /** @param {QualityMode} [mode] */
+    setQualityMode(mode) {
+        return this.systems.quality.setQualityMode(mode);
+    }
 
-    /** Installed by GameRuntime.js */
-    resetAdaptiveOverrides() {}
+    resetAdaptiveOverrides() {
+        return this.systems.quality.resetAdaptiveOverrides();
+    }
 
-    /** @param {number} fps Installed by GameRuntime.js */
-    updateAdaptiveQuality(fps) {}
+    /** @param {number} fps */
+    updateAdaptiveQuality(fps) {
+        return this.systems.quality.updateAdaptiveQuality(fps);
+    }
 
-    /** @param {number} dt @param {number} [fps] Installed by GameRuntime.js */
-    updatePerfMetrics(dt, fps) {}
+    /** @param {number} dt @param {number} [fps] */
+    updatePerfMetrics(dt, fps) {
+        return this.systems.quality.updatePerfMetrics(dt, fps);
+    }
 
-    /** Installed by GameRuntime.js */
-    updateFrameTimeAdaptive() {}
+    updateFrameTimeAdaptive() {
+        return this.systems.quality.updateFrameTimeAdaptive();
+    }
 
-    /** @param {number} timestamp Installed by GameRuntime.js */
-    loop(timestamp) {}
+    /** @param {number} timestamp */
+    loop(timestamp) {
+        return this.systems.loop.loop(timestamp);
+    }
 
-    /** Installed by GameRuntime.js */
-    shatterAllCrystals() {}
+    shatterAllCrystals() {
+        return this.systems.juice.shatterAllCrystals();
+    }
 
-    /** @param {number} dt Installed by GameRuntime.js */
-    updateVisuals(dt) {}
+    /** @param {number} dt */
+    updateVisuals(dt) {
+        return this.systems.loop.updateVisuals(dt);
+    }
 }
-
-installGameRuntime(Game);

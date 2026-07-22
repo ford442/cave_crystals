@@ -1,0 +1,6 @@
+# Playwright failure screenshots (ephemeral)
+*.png
+!baselines/*.png
+
+# Pixel-diff artifacts from failed visual regression runs
+diffs/

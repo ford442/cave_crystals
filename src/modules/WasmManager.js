@@ -1,16 +1,12 @@
+// @ts-check
 /**
  * WASM Manager for Cave Crystals Game
- * Handles loading and interfacing with WebAssembly modules
+ * Loads ASC-generated bindings via wasmBridge and exposes {@link WasmManagerApi} with JS fallbacks.
  *
- * @import { CollisionResult, Crystal, Spore } from './types.js'
+ * @import { CollisionResult, Crystal, Spore, WasmManagerApi } from './types.js'
+ * @import { loadWasmBindings } from './wasmBridge.js'
  */
 
-import {
-    SIMPLE_BATCH_STRIDE,
-    SIMPLE_BATCH_FLOAT_COUNT,
-    TRAIL_BATCH_STRIDE,
-    TRAIL_BATCH_FLOAT_COUNT
-} from './WasmConstants.js';
 import {
     parseCollisionFlags,
     jsCheckCollisions,
@@ -20,15 +16,30 @@ import {
     jsGetSmokeVx,
     jsGetSmokeVy,
     jsCalculateHomingVx,
-    jsCalculateHomingVy
+    jsCalculateHomingVy,
+    jsSetSeed,
 } from './WasmFallbacks.js';
+import {
+    getWasmBatchLayout,
+    packAmbientBatch,
+    scatterAmbientBatch,
+    packTrailBatch,
+    scatterTrailBatch,
+    AMBIENT_MIN_BATCH,
+    TRAIL_MIN_BATCH,
+} from './particleBatchCodec.js';
 import { logWasmFallbackOnce, logWasmInfo } from './WasmLogging.js';
+import { loadWasmBindings } from './wasmBridge.js';
 
+/** @typedef {Awaited<ReturnType<typeof loadWasmBindings>>} WasmBindings */
+
+/**
+ * Loads release WASM and exposes {@link WasmManagerApi} with JavaScript fallbacks.
+ * @implements {WasmManagerApi}
+ */
 export class WasmManager {
     constructor() {
-        this.module = null;
-        this.instance = null;
-        /** @type {import('./types.js').WasmExports | null} */
+        /** @type {WasmBindings | null} */
         this.exports = null;
         this.ready = false;
         this.loadPromise = null;
@@ -48,35 +59,19 @@ export class WasmManager {
 
     async _loadModule() {
         try {
-            const wasmUrl = new URL('../../build/release.wasm', import.meta.url).href;
-
-            const response = await fetch(wasmUrl);
-            const buffer = await response.arrayBuffer();
-
-            const imports = {
-                env: {
-                    abort: (msg, file, line, col) => console.error(`WASM abort: ${msg} at ${file}:${line}:${col}`),
-                    seed: () => Math.random()
-                }
-            };
-
-            const wasm = await WebAssembly.instantiate(buffer, imports);
-
-            this.module = wasm.module;
-            this.instance = wasm.instance;
-            this.exports = /** @type {import('./types.js').WasmExports} */ (wasm.instance.exports);
+            const wasm = await loadWasmBindings();
+            this.exports = wasm;
             this.ready = true;
 
             const MAX_UINT32 = 0xffffffff;
             const seed = Math.floor(Math.random() * MAX_UINT32);
-            if (this.exports.setSeed) {
-                this.exports.setSeed(seed);
-            }
+            this.setGameplaySeed(seed);
 
             logWasmInfo('WASM module loaded successfully');
             return true;
         } catch (error) {
             logWasmFallbackOnce('load', 'Failed to load WASM module, falling back to JavaScript:', error);
+            this.exports = null;
             this.ready = false;
             return false;
         }
@@ -90,45 +85,24 @@ export class WasmManager {
     }
 
     /**
+     * Sync WASM and JS fallback LCG streams for juice helpers that use fastRandom.
+     * @param {number} seed
+     */
+    setGameplaySeed(seed) {
+        const mixed = (seed >>> 0) ^ 0xc0ffee;
+        jsSetSeed(mixed);
+        const wasm = this.exports;
+        if (this.ready && wasm?.setSeed) {
+            wasm.setSeed(mixed);
+        }
+    }
+
+    /**
      * @param {'simple' | 'trail'} kind
      * @returns {{ byteOffset: number, stride: number, maxBatch: number } | null}
      */
     _getBatchLayout(kind) {
-        if (!this.ready || !this.exports || !this.instance) return null;
-
-        const memory = this.instance.exports.memory;
-        if (!(memory instanceof WebAssembly.Memory)) return null;
-
-        const isSimple = kind === 'simple';
-        const getOffset = isSimple ? this.exports.getSimpleBatchByteOffset : this.exports.getTrailBatchByteOffset;
-        const getStride = isSimple ? this.exports.getSimpleBatchStride : this.exports.getTrailBatchStride;
-        const getFloatCount = isSimple ? this.exports.getSimpleBatchFloatCount : this.exports.getTrailBatchFloatCount;
-        const expectedStride = isSimple ? SIMPLE_BATCH_STRIDE : TRAIL_BATCH_STRIDE;
-        const expectedFloatCount = isSimple ? SIMPLE_BATCH_FLOAT_COUNT : TRAIL_BATCH_FLOAT_COUNT;
-
-        if (!getOffset || !getStride || !getFloatCount) return null;
-
-        const byteOffset = getOffset();
-        const stride = getStride();
-        const floatCount = getFloatCount();
-
-        if (stride !== expectedStride || floatCount !== expectedFloatCount) {
-            logWasmFallbackOnce(
-                `batch-layout-${kind}`,
-                `WASM ${kind} batch layout mismatch (stride ${stride}, floats ${floatCount})`
-            );
-            return null;
-        }
-
-        if (byteOffset < 0 || byteOffset % 8 !== 0 || byteOffset + floatCount * 8 > memory.buffer.byteLength) {
-            logWasmFallbackOnce(
-                `batch-offset-${kind}`,
-                `WASM ${kind} batch byteOffset out of bounds (${byteOffset})`
-            );
-            return null;
-        }
-
-        return { byteOffset, stride, maxBatch: Math.floor(floatCount / stride) };
+        return getWasmBatchLayout(this.exports, kind);
     }
 
     /**
@@ -140,12 +114,13 @@ export class WasmManager {
      * @returns {CollisionResult}
      */
     checkCollisions(spore, topCrystal, bottomCrystal, canvasHeight) {
-        if (!this.ready || !this.exports.checkCollisions) {
+        const wasm = this.exports;
+        if (!this.ready || !wasm) {
             return jsCheckCollisions(spore, topCrystal, bottomCrystal, canvasHeight);
         }
 
         try {
-            const result = this.exports.checkCollisions(
+            const result = wasm.checkCollisions(
                 spore.y,
                 spore.radius,
                 spore.lane,
@@ -170,8 +145,9 @@ export class WasmManager {
      * @returns {number}
      */
     calculateMatchHeight(currentHeight, shrinkAmount, minHeight) {
-        if (this.ready && this.exports.calculateMatchHeight) {
-            return this.exports.calculateMatchHeight(currentHeight, shrinkAmount, minHeight);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.calculateMatchHeight(currentHeight, shrinkAmount, minHeight);
         }
         return jsCalculateMatchHeight(currentHeight, shrinkAmount, minHeight);
     }
@@ -182,8 +158,9 @@ export class WasmManager {
      * @returns {number}
      */
     calculatePenaltyHeight(currentHeight, growthAmount) {
-        if (this.ready && this.exports.calculatePenaltyHeight) {
-            return this.exports.calculatePenaltyHeight(currentHeight, growthAmount);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.calculatePenaltyHeight(currentHeight, growthAmount);
         }
         return jsCalculatePenaltyHeight(currentHeight, growthAmount);
     }
@@ -193,9 +170,9 @@ export class WasmManager {
         return baseRate * multiplier;
     }
 
-    /** @param {number} score @param {number} [divisor] @returns {number} */
-    calculateGrowthMultiplier(score, divisor = 500) {
-        return 1 + (score / divisor);
+    /** @param {number} score @param {number} [motionDivisor] @returns {number} */
+    calculateGrowthMultiplier(score, motionDivisor = 500) {
+        return 1 + (score / motionDivisor);
     }
 
     /** @param {number} height1 @param {number} height2 @param {number} maxHeight @returns {boolean} */
@@ -204,31 +181,35 @@ export class WasmManager {
     }
 
     getShatterVx(index, total, force) {
-        if (this.ready && this.exports.getShatterVx) {
-            return this.exports.getShatterVx(index, total, force);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getShatterVx(index, total, force);
         }
         const angle = (index / total) * Math.PI * 2;
         return Math.cos(angle) * force;
     }
 
     getShatterVy(index, total, force) {
-        if (this.ready && this.exports.getShatterVy) {
-            return this.exports.getShatterVy(index, total, force);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getShatterVy(index, total, force);
         }
         const angle = (index / total) * Math.PI * 2;
         return Math.sin(angle) * force;
     }
 
     getBounceVy(vy, damping) {
-        if (this.ready && this.exports.getBounceVy) {
-            return this.exports.getBounceVy(vy, damping);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getBounceVy(vy, damping);
         }
         return jsGetBounceVy(vy, damping);
     }
 
     getDirectionalVx(index, total, force, angle, spread) {
-        if (this.ready && this.exports.getDirectionalVx) {
-            return this.exports.getDirectionalVx(index, total, force, angle, spread);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getDirectionalVx(index, total, force, angle, spread);
         }
         const fraction = index / total;
         const offset = (fraction - 0.5) * spread;
@@ -237,8 +218,9 @@ export class WasmManager {
     }
 
     getDirectionalVy(index, total, force, angle, spread) {
-        if (this.ready && this.exports.getDirectionalVy) {
-            return this.exports.getDirectionalVy(index, total, force, angle, spread);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getDirectionalVy(index, total, force, angle, spread);
         }
         const fraction = index / total;
         const offset = (fraction - 0.5) * spread;
@@ -247,44 +229,50 @@ export class WasmManager {
     }
 
     getSmokeVx(random) {
-        if (this.ready && this.exports.getSmokeVx) {
-            return this.exports.getSmokeVx(random);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getSmokeVx(random);
         }
         return jsGetSmokeVx(random);
     }
 
     getSmokeVy(random) {
-        if (this.ready && this.exports.getSmokeVy) {
-            return this.exports.getSmokeVy(random);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getSmokeVy(random);
         }
         return jsGetSmokeVy(random);
     }
 
     calculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility) {
-        if (this.ready && this.exports.calculateHomingVx) {
-            return this.exports.calculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.calculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility);
         }
         return jsCalculateHomingVx(currVx, currVy, x, y, tx, ty, speed, agility);
     }
 
     calculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility) {
-        if (this.ready && this.exports.calculateHomingVy) {
-            return this.exports.calculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.calculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility);
         }
         return jsCalculateHomingVy(currVx, currVy, x, y, tx, ty, speed, agility);
     }
 
     getSpiralVx(index, total, force, spiralFactor) {
-        if (this.ready && this.exports.getSpiralVx) {
-            return this.exports.getSpiralVx(index, total, force, spiralFactor);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getSpiralVx(index, total, force, spiralFactor);
         }
         const angle = (index / total) * Math.PI * 2;
         return Math.cos(angle) * force + Math.sin(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
     }
 
     getSpiralVy(index, total, force, spiralFactor) {
-        if (this.ready && this.exports.getSpiralVy) {
-            return this.exports.getSpiralVy(index, total, force, spiralFactor);
+        const wasm = this.exports;
+        if (this.ready && wasm) {
+            return wasm.getSpiralVy(index, total, force, spiralFactor);
         }
         const angle = (index / total) * Math.PI * 2;
         return Math.sin(angle) * force - Math.cos(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
@@ -299,8 +287,8 @@ export class WasmManager {
      * @returns {boolean}
      */
     batchIntegrateAmbientParticles(ambientParticles, count, timeScale, rendererWidth, rendererHeight) {
-        const MIN_BATCH = 48;
-        if (!this.ready || !this.exports.batchIntegrateSimpleParticles || count < MIN_BATCH) {
+        const wasm = this.exports;
+        if (!this.ready || !wasm || count < AMBIENT_MIN_BATCH) {
             return false;
         }
 
@@ -308,34 +296,15 @@ export class WasmManager {
         if (!layout) return false;
 
         try {
-            const memory = /** @type {WebAssembly.Memory} */ (this.instance.exports.memory);
+            const memory = wasm.memory;
             const batchCount = Math.min(count, layout.maxBatch);
             const view = new Float64Array(memory.buffer, layout.byteOffset, layout.stride * batchCount);
 
-            for (let j = 0; j < batchCount; j++) {
-                const p = ambientParticles[j];
-                const base = j * layout.stride;
-                view[base] = p.x;
-                view[base + 1] = p.y;
-                view[base + 2] = p.vx;
-                view[base + 3] = p.vy;
-                view[base + 4] = p.life;
-                view[base + 5] = p.gravity;
-                view[base + 6] = p.friction;
-            }
+            packAmbientBatch(ambientParticles, batchCount, view);
 
-            this.exports.batchIntegrateSimpleParticles(batchCount, timeScale, 0.015);
+            wasm.batchIntegrateSimpleParticles(batchCount, timeScale, 0.015);
 
-            for (let j = 0; j < batchCount; j++) {
-                const p = ambientParticles[j];
-                const base = j * layout.stride;
-                p.x = view[base];
-                p.y = view[base + 1];
-                p.vx = view[base + 2];
-                p.vy = view[base + 3];
-                p.life = view[base + 4];
-                p._cacheDrawState(rendererWidth, rendererHeight);
-            }
+            scatterAmbientBatch(ambientParticles, batchCount, view, rendererWidth, rendererHeight);
 
             if (batchCount < count) {
                 for (let j = batchCount; j < count; j++) {
@@ -358,8 +327,8 @@ export class WasmManager {
      * @returns {boolean}
      */
     batchIntegrateTrailParticles(trailParticles, count, timeScale, rendererWidth, rendererHeight) {
-        const MIN_BATCH = 24;
-        if (!this.ready || !this.exports.batchIntegrateTrailParticles || count < MIN_BATCH) {
+        const wasm = this.exports;
+        if (!this.ready || !wasm || count < TRAIL_MIN_BATCH) {
             return false;
         }
 
@@ -367,38 +336,15 @@ export class WasmManager {
         if (!layout) return false;
 
         try {
-            const memory = /** @type {WebAssembly.Memory} */ (this.instance.exports.memory);
+            const memory = wasm.memory;
             const batchCount = Math.min(count, layout.maxBatch);
             const view = new Float64Array(memory.buffer, layout.byteOffset, layout.stride * batchCount);
 
-            for (let j = 0; j < batchCount; j++) {
-                const p = trailParticles[j];
-                const base = j * layout.stride;
-                view[base] = p.x;
-                view[base + 1] = p.y;
-                view[base + 2] = p.vx;
-                view[base + 3] = p.vy;
-                view[base + 4] = p.life;
-                view[base + 5] = p.size;
-            }
+            packTrailBatch(trailParticles, batchCount, view);
 
-            this.exports.batchIntegrateTrailParticles(batchCount, timeScale);
+            wasm.batchIntegrateTrailParticles(batchCount, timeScale);
 
-            for (let j = 0; j < batchCount; j++) {
-                const p = trailParticles[j];
-                const base = j * layout.stride;
-                p.x = view[base];
-                p.y = view[base + 1];
-                p.vx = view[base + 2];
-                p.vy = view[base + 3];
-                p.life = view[base + 4];
-                p.size = view[base + 5];
-                p._drawAlpha = p.life;
-                p._screenSize = p.size;
-                const s = p.size;
-                p._onScreen = p.x + s >= 0 && p.x - s <= rendererWidth
-                    && p.y + s >= 0 && p.y - s <= rendererHeight;
-            }
+            scatterTrailBatch(trailParticles, batchCount, view, rendererWidth, rendererHeight);
 
             if (batchCount < count) {
                 for (let j = batchCount; j < count; j++) {
@@ -413,4 +359,4 @@ export class WasmManager {
     }
 }
 
-export const wasmManager = new WasmManager();
+export const wasmManager = /** @type {WasmManagerApi} */ (new WasmManager());

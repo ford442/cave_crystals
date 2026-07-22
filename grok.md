@@ -16,7 +16,7 @@ The project emphasizes **"game juice"** — extensive screen shake, chromatic ab
 - **Audio**: Web Audio API (all sound effects synthesized in real time; no audio files)
 - **Background**: Static PNG image (`src/assets/background.png`) inserted as a DOM `<img>` behind the canvas
 - **Verification**: Playwright (Python) scripts for visual/integration testing
-- **Deployment**: Python/paramiko SFTP script (`deploy.py`)
+- **Deployment**: Python bundle upload via Contabo deploy API (`deploy.py`, token from env)
 
 ## Directory Structure
 
@@ -26,7 +26,7 @@ The project emphasizes **"game juice"** — extensive screen shake, chromatic ab
 ├── asconfig.json         # AssemblyScript compiler configuration
 ├── vite.config.js        # Vite build configuration
 ├── index.html            # Single-page app HTML entry
-├── deploy.py             # SFTP deployment script (⚠️ contains hardcoded password)
+├── deploy.py             # Production deploy script (env-based token auth)
 ├── plan.md               # Game enhancement plan (feature backlog)
 ├── AGENTS.md             # Full detailed agent instructions (also read this)
 ├── grok.md               # This file — Grok quick-start guide
@@ -76,7 +76,7 @@ npm run asbuild      # Build WASM only (debug + release)
 - **Game juice is sacred**: Screen shake, time dilation (`state.timeScale`), hit-stop (`state.sleepTimer`), chromatic aberration, impact flashes, recoil (`state.kickY`), shockwaves — these are core to the experience.
 - **Multi-step work**: Use the `todo_write` tool for any task with 3+ steps. Keep todos updated in real time.
 - **Verification**: Many visual/integration tests live in `verification/`. They use Playwright (sync + async). Typical flow: build → start server (port 8081 or Vite 5173) → interact via `page.evaluate()` → screenshot or assert state.
-- **Input handling**: Mouse + touch. Touch events both set lane and fire immediately.
+- **Input handling**: Mouse, touch (canvas `touchstart` with `preventDefault` + ghost-click suppression), and keyboard/gamepad via `InputManager` (arrows/A/D, Space/Enter). Fire input buffers one frame when combined with a lane change.
 - **State shape**: All game state lives under `this.state` in the Game class (crystals, spores, particles, soulParticles, dustParticles, laneMap, combo, sleepTimer, etc.).
 - **Renderer**: Heavy use of Canvas 2D with multiple composite passes (lighter for glows), shockwave distortion, post-processing effects.
 
@@ -91,8 +91,8 @@ npm run asbuild      # Build WASM only (debug + release)
 
 ## Security Notes
 
-- `deploy.py` contains a **hardcoded password** (`'GoogleBez12!'`). Do not expose this value. The project should migrate to SSH keys or environment variables.
-- No `.env` or secrets management is currently in place.
+- Store `DEPLOY_TOKEN` in `.env` or `deploy.local.json` (gitignored). See `docs/DEPLOY.md`.
+- Use credential-free git remotes (`https://github.com/...` or `git@github.com:...`) with external auth.
 - No CSP headers are defined in the static hosting setup.
 
 ## Notes

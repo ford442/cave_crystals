@@ -64,6 +64,9 @@
  * @property {number} sporeCount
  * @property {number} particleDrawMs
  * @property {number} particleUpdateMs
+ * @property {'worker' | 'main' | 'idle'} [particleIntegratorPath]
+ * @property {number} [particleWorkerMs]
+ * @property {number} [particleWorkerBacklog]
  */
 
 /**
@@ -115,6 +118,39 @@
  */
 
 /**
+ * @typedef {Object} GameColor
+ * @property {string} name
+ * @property {string} hex
+ * @property {string} glow
+ */
+
+/**
+ * @typedef {'circle' | 'triangle' | 'square' | 'diamond' | 'star'} ColorShape
+ */
+
+/**
+ * @typedef {GameColor & { shape: ColorShape, glyph: string, shortLabel?: string }} PaletteColor
+ */
+
+/**
+ * @typedef {Object} GameConfig
+ * @property {number} lanes
+ * @property {number} baseGrowthRate
+ * @property {number} sporeExpandRate
+ * @property {number} maxSporeSize
+ * @property {number} penaltyGrowth
+ * @property {number} matchShrink
+ */
+
+/**
+ * @typedef {'score' | 'survival' | 'streak' | 'clearance'} ObjectiveType
+ */
+
+/**
+ * @typedef {'on_shoot' | 'on_activate' | 'on_pickup'} PowerUpActivation
+ */
+
+/**
  * @typedef {Object} Crystal
  * @property {number} lane
  * @property {CrystalType} type
@@ -158,6 +194,7 @@
  * @property {number} wobblePhase
  * @property {number} inFlightAge
  * @property {SporeLightningArc[]} lightningArcs
+ * @property {{ rainbow?: boolean }} modifiers
  */
 
 /**
@@ -344,6 +381,8 @@
 /**
  * @typedef {Object} GameState
  * @property {boolean} active
+ * @property {boolean} [paused]
+ * @property {number} gameClockMs
  * @property {number} score
  * @property {number} level
  * @property {number} lastTime
@@ -374,6 +413,11 @@
  * @property {number} timeScale
  * @property {number} targetTimeScale
  * @property {number} slowMoTimer
+ * @property {boolean} paused
+ * @property {number} motionScale
+ * @property {boolean} reducedMotion
+ * @property {boolean} colorBlindMode
+ * @property {import('./types.js').PaletteColor[]} colorPalette
  * @property {QualityMode} qualityMode
  * @property {RenderQualityLevel} renderQuality
  * @property {boolean} devPerfOverlay
@@ -478,6 +522,127 @@
  */
 
 /**
+ * Public WASM wrapper surface — each method falls back to JavaScript when WASM is unavailable.
+ * @typedef {Object} WasmManagerApi
+ * @property {() => Promise<boolean>} init
+ * @property {() => boolean} isReady
+ * @property {(seed: number) => void} setGameplaySeed
+ * @property {(spore: Spore, topCrystal: Crystal, bottomCrystal: Crystal, canvasHeight: number) => CollisionResult} checkCollisions
+ * @property {(currentHeight: number, shrinkAmount: number, minHeight: number) => number} calculateMatchHeight
+ * @property {(currentHeight: number, growthAmount: number) => number} calculatePenaltyHeight
+ * @property {(baseRate: number, multiplier: number) => number} calculateCrystalGrowth
+ * @property {(score: number, divisor?: number) => number} calculateGrowthMultiplier
+ * @property {(height1: number, height2: number, maxHeight: number) => boolean} checkCrystalGameOver
+ * @property {(index: number, total: number, force: number) => number} getShatterVx
+ * @property {(index: number, total: number, force: number) => number} getShatterVy
+ * @property {(vy: number, damping: number) => number} getBounceVy
+ * @property {(index: number, total: number, force: number, angle: number, spread: number) => number} getDirectionalVx
+ * @property {(index: number, total: number, force: number, angle: number, spread: number) => number} getDirectionalVy
+ * @property {(random: number) => number} getSmokeVx
+ * @property {(random: number) => number} getSmokeVy
+ * @property {(currVx: number, currVy: number, x: number, y: number, tx: number, ty: number, speed: number, agility: number) => number} calculateHomingVx
+ * @property {(currVx: number, currVy: number, x: number, y: number, tx: number, ty: number, speed: number, agility: number) => number} calculateHomingVy
+ * @property {(index: number, total: number, force: number, spiralFactor: number) => number} getSpiralVx
+ * @property {(index: number, total: number, force: number, spiralFactor: number) => number} getSpiralVy
+ * @property {(ambientParticles: InstanceType<typeof import('./Entities.js').Particle>[], count: number, timeScale: number, rendererWidth: number, rendererHeight: number) => boolean} batchIntegrateAmbientParticles
+ * @property {(trailParticles: InstanceType<typeof import('./Entities.js').TrailParticle>[], count: number, timeScale: number, rendererWidth: number, rendererHeight: number) => boolean} batchIntegrateTrailParticles
+ */
+
+/**
+ * @typedef {'campaign' | 'endless'} GameMode
+ */
+
+/**
+ * @typedef {Object} SporeModifiers
+ * @property {boolean} [rainbow]
+ */
+
+/**
+ * @typedef {Object} PowerUpDefinition
+ * @property {string} id
+ * @property {string} name
+ * @property {PowerUpActivation} activation
+ * @property {number | null} durationMs
+ * @property {number} rarity
+ * @property {string} color
+ * @property {string} hudLabel
+ * @property {string} icon
+ * @property {string} description
+ * @property {string} [activateKey]
+ */
+
+/**
+ * @typedef {Object} ActivePowerUpTimer
+ * @property {string} typeId
+ * @property {number} remainingMs
+ * @property {number} durationMs
+ * @property {number} [stacks]
+ */
+
+/**
+ * @typedef {Object} HudPowerUpSlot
+ * @property {string} typeId
+ * @property {string} label
+ * @property {string} color
+ * @property {string} icon
+ * @property {number} count
+ * @property {number | null} remainingMs
+ * @property {number | null} durationMs
+ * @property {string} activation
+ */
+
+/**
+ * @typedef {Object} LevelObjective
+ * @property {ObjectiveType} type
+ * @property {number} target
+ */
+
+/**
+ * @typedef {Object} LevelGrowthConfig
+ * @property {number} baseMultiplier
+ * @property {number} scoreDivisor
+ */
+
+/**
+ * @typedef {Object} LevelRuntimeConfig
+ * @property {number} lanes
+ * @property {number} colorCount
+ * @property {{ min: number, max: number }} crystalHeight
+ * @property {LevelGrowthConfig} growth
+ * @property {LevelObjective} [objective]
+ */
+
+/**
+ * @typedef {Object} LevelDefinition
+ * @property {number} id
+ * @property {string} name
+ * @property {number} lanes
+ * @property {number} colorCount
+ * @property {{ min: number, max: number }} crystalHeight
+ * @property {LevelGrowthConfig} growth
+ * @property {LevelObjective} objective
+ * @property {string} description
+ */
+
+/**
+ * @typedef {Object} SpawnConfig
+ * @property {number} lanes
+ * @property {number} colorCount
+ * @property {number} heightMin
+ * @property {number} heightMax
+ */
+
+/**
+ * @typedef {Object} ObjectiveProgress
+ * @property {string} label
+ * @property {number} current
+ * @property {number} target
+ * @property {number} percent
+ * @property {string} levelName
+ * @property {number} levelNumber
+ */
+
+/**
  * @typedef {Object} GameUiElements
  * @property {HTMLElement | null} start
  * @property {HTMLElement | null} gameOver
@@ -488,7 +653,20 @@
  * @property {HTMLElement | null} startBtn
  * @property {HTMLElement | null} restartBtn
  * @property {HTMLElement | null} fps
- * @property {HTMLSelectElement | null} qualitySelect
+ * @property {HTMLSelectElement | null} [qualitySelect]
+ * @property {HTMLSelectElement | null} [modeSelect]
+ * @property {HTMLElement | null} objectiveLabel
+ * @property {HTMLElement | null} objectiveProgress
+ * @property {HTMLElement | null} objectiveBar
+ * @property {HTMLElement | null} levelName
+ * @property {HTMLElement | null} gameOverTitle
+ * @property {HTMLElement | null} powerUpHud
+ * @property {HTMLButtonElement | null} powerUpActivateBtn
+ * @property {HTMLElement | null} pause
+ * @property {HTMLButtonElement | null} resumeBtn
+ * @property {HTMLElement | null} highScoreVal
+ * @property {HTMLElement | null} bestComboVal
+ * @property {HTMLElement | null} accuracyVal
  */
 
 export {};

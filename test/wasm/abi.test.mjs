@@ -8,14 +8,14 @@ import {
     TRAIL_BATCH_STRIDE,
     TRAIL_BATCH_FLOAT_COUNT
 } from '../../src/modules/WasmConstants.js';
-import { loadReleaseWasm, requireExport } from './wasmLoader.mjs';
+import { loadWasm, requireExport } from './wasmLoader.mjs';
 
 describe('WASM ABI contract', () => {
     /** @type {WebAssembly.Instance} */
     let instance;
 
     before(async () => {
-        instance = await loadReleaseWasm();
+        instance = await loadWasm();
     });
 
     it('exports all required symbols', () => {

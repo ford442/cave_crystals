@@ -1,19 +1,22 @@
 import os
 import sys
-import time
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from server import CHROMIUM_ARGS, DistServer, report_screenshot
+from screenshot_utils import (
+    advance,
+    capture_deterministic_screenshot,
+    new_deterministic_page,
+)
+from server import CHROMIUM_ARGS, DistServer
 
 
 def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            context = browser.new_context(viewport={"width": 1280, "height": 800})
-            page = context.new_page()
+            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
 
             page.on("console", lambda msg: print(f"Console: {msg.text}"))
             page.on("pageerror", lambda err: print(f"Page Error: {err}"))
@@ -21,10 +24,10 @@ def run():
             print(f"Navigating to {server.url}")
             page.goto(server.url)
             page.wait_for_selector("#gameCanvas")
-            time.sleep(1)
+            advance(page, 1000)
 
             page.click("#startBtn")
-            time.sleep(1)
+            advance(page, 1000)
 
             print("Injecting massive shockwave...")
             page.evaluate("""
@@ -38,11 +41,13 @@ def run():
                 }
             """)
 
-            time.sleep(0.5)
+            advance(page, 500)
 
-            screenshot_path = "verification/verify_warp_grid.png"
-            page.screenshot(path=screenshot_path)
-            report_screenshot(screenshot_path)
+            capture_deterministic_screenshot(
+                page,
+                "verification/verify_warp_grid.png",
+                timestamp=1_000_400,
+            )
 
             browser.close()
 

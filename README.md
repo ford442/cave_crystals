@@ -33,8 +33,8 @@ A procedural arcade shooter built with HTML5 Canvas, WebGL, and the Web Audio AP
 Playwright (Python) scripts in `verification/` smoke-test the game against a production build. They require `python3` (not `python`) plus Playwright and its Chromium browser:
 
 ```bash
-pip install playwright
-playwright install chromium --with-deps
+pip install -r verification/requirements.txt
+python3 -m playwright install chromium --with-deps
 ```
 
 Each script starts its own static server on an available port via `verification/server.py`, so nothing needs to be running beforehand.
@@ -42,9 +42,37 @@ Each script starts its own static server on an available port via `verification/
 - `npm run verify` — build, then run one fast Playwright smoke test. This is the single command for a clean-shell check.
 - `npm run verify:build` — just the production build.
 - `npm run verify:smoke` — just the smoke test (assumes `dist/` is already built).
-- `npm run verify:visual` — run the full battery of visual/behavioral Playwright scripts and print a pass/fail summary.
+- `npm run verify:visual` — run six canonical scripts and fail when canvas screenshots diverge from `verification/baselines/`.
+- `npm run verify:visual:update` — refresh committed baselines after intentional art/VFX changes.
+- `npm run verify:visual:all` — run the full Playwright battery without baseline comparison.
 
 Screenshots are written under `verification/` and logged as `[screenshot] <path>`; failure artifacts are logged as `[failure] <path>`.
+
+## CI
+
+GitHub Actions runs two workflows on every push to `main` and on pull requests (no secrets required):
+
+| Workflow | What it checks |
+|----------|----------------|
+| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures, WASM unit tests |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test + non-blocking visual regression |
+
+Reproduce CI locally:
+
+```bash
+npm ci
+npm run lint && npm run typecheck && npm run test:lint && npm run test:unit   # lint.yml
+npm run build                                                                  # ci.yml build job
+pip install -r verification/requirements.txt && python3 -m playwright install chromium --with-deps
+python3 verification/verify_juice.py                                           # ci.yml smoke job
+python3 verification/run_visual.py                                           # ci.yml visual job (non-blocking)
+```
+
+Or use the combined shortcut for the build + smoke path:
+
+```bash
+npm run verify   # build + verify_juice.py
+```
 
 ## Controls
 

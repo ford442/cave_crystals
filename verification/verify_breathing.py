@@ -1,18 +1,22 @@
 import os
 import sys
-import time
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from server import CHROMIUM_ARGS, DistServer, report_screenshot
+from screenshot_utils import (
+    advance,
+    capture_deterministic_screenshot,
+    new_deterministic_page,
+)
+from server import CHROMIUM_ARGS, DistServer
 
 
 def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
 
             page.on("console", lambda msg: print(f"Browser console: {msg.text}"))
             page.on("pageerror", lambda msg: print(f"Browser error: {msg}"))
@@ -25,17 +29,17 @@ def run():
             page.click("#startBtn")
 
             print("Waiting for crystals to spawn and stabilize...")
-            time.sleep(2.0)
+            advance(page, 2000)
 
             print("Polling crystal scaleX...")
             scales = []
-            for i in range(10):
+            for _i in range(10):
                 scale = page.evaluate(
                     "() => { return window.game.state.crystals.length > 0 ? window.game.state.crystals[0].scaleX : null; }"
                 )
                 if scale is not None:
                     scales.append(scale)
-                time.sleep(0.1)
+                advance(page, 100)
 
             print(f"Collected scales: {scales}")
 
@@ -59,9 +63,11 @@ def run():
 
             print("SUCCESS: Crystal scale is varying (Breathing effect active).")
 
-            screenshot_path = "verification/breathing_crystals.png"
-            page.screenshot(path=screenshot_path)
-            report_screenshot(screenshot_path)
+            capture_deterministic_screenshot(
+                page,
+                "verification/breathing_crystals.png",
+                timestamp=1_000_600,
+            )
 
             browser.close()
 

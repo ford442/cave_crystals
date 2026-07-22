@@ -7,6 +7,7 @@ import {
 } from '../../src/modules/WasmConstants.js';
 import {
     parseCollisionFlags,
+    encodeCollisionFlags,
     jsCheckCollisions,
     jsCalculateMatchHeight,
     jsCalculatePenaltyHeight,
@@ -18,22 +19,52 @@ import {
     jsIntegrateSimpleBatch,
     jsIntegrateTrailBatch
 } from '../../src/modules/WasmFallbacks.js';
-import { loadReleaseWasm, requireExport } from './wasmLoader.mjs';
+import { assertClose, assertFloat64ArraysClose } from './helpers.mjs';
+import { loadWasm } from './wasmLoader.mjs';
 
-const EPS = 1e-9;
-
-/** @param {number} a @param {number} b @param {number} [tol] */
-function assertClose(a, b, tol = EPS) {
-    assert.ok(Math.abs(a - b) <= tol, `expected ${a} ≈ ${b} (tol ${tol})`);
-}
-
-/** @param {Float64Array} a @param {Float64Array} b @param {number} [tol] */
-function assertFloat64ArraysClose(a, b, tol = EPS) {
-    assert.equal(a.length, b.length);
-    for (let i = 0; i < a.length; i++) {
-        assertClose(a[i], b[i], tol);
-    }
-}
+/** Collision flag matrix: all valid bit combinations. */
+const COLLISION_MATRIX = [
+  {
+    label: 'no hit',
+    y: 300, r: 10, lane: 0, color: 0, topH: 20, topC: 0, botH: 20, botC: 0, canvas: 600,
+    expected: 0
+  },
+  {
+    label: 'top hit only',
+    y: 25, r: 10, lane: 1, color: 0, topH: 50, topC: 1, botH: 20, botC: 0, canvas: 600,
+    expected: encodeCollisionFlags(true, false, false, false)
+  },
+  {
+    label: 'top hit + match',
+    y: 25, r: 10, lane: 1, color: 2, topH: 50, topC: 2, botH: 20, botC: 0, canvas: 600,
+    expected: encodeCollisionFlags(true, true, false, false)
+  },
+  {
+    label: 'bottom hit only',
+    y: 570, r: 10, lane: 2, color: 0, topH: 20, topC: 0, botH: 50, botC: 1, canvas: 600,
+    expected: encodeCollisionFlags(false, false, true, false)
+  },
+  {
+    label: 'both hits, no matches',
+    y: 300, r: 10, lane: 3, color: 0, topH: 400, topC: 1, botH: 400, botC: 2, canvas: 600,
+    expected: encodeCollisionFlags(true, false, true, false)
+  },
+  {
+    label: 'top match + bottom hit',
+    y: 300, r: 10, lane: 0, color: 1, topH: 400, topC: 1, botH: 400, botC: 2, canvas: 600,
+    expected: encodeCollisionFlags(true, true, true, false)
+  },
+  {
+    label: 'bottom hit + match',
+    y: 570, r: 10, lane: 2, color: 3, topH: 20, topC: 0, botH: 50, botC: 3, canvas: 600,
+    expected: encodeCollisionFlags(false, false, true, true)
+  },
+  {
+    label: 'all flags',
+    y: 300, r: 10, lane: 4, color: 2, topH: 400, topC: 2, botH: 400, botC: 2, canvas: 600,
+    expected: encodeCollisionFlags(true, true, true, true)
+  }
+];
 
 describe('WASM / JS fallback parity', () => {
     /** @type {WebAssembly.Instance} */
@@ -42,22 +73,17 @@ describe('WASM / JS fallback parity', () => {
     let exp;
 
     before(async () => {
-        instance = await loadReleaseWasm();
+        instance = await loadWasm();
         exp = /** @type {Record<string, Function>} */ (instance.exports);
         exp.setSeed(42);
     });
 
-    it('checkCollisions flags match JS fallback', () => {
-        const cases = [
-            { y: 50, r: 10, lane: 1, color: 2, topH: 80, topC: 2, botH: 60, botC: 1, canvas: 600 },
-            { y: 520, r: 12, lane: 3, color: 0, topH: 40, topC: 1, botH: 90, botC: 0, canvas: 600 },
-            { y: 300, r: 8, lane: 0, color: 4, topH: 20, topC: 4, botH: 20, botC: 4, canvas: 600 }
-        ];
-
-        for (const c of cases) {
+    it('checkCollisions flags match JS fallback for all valid combinations', () => {
+        for (const c of COLLISION_MATRIX) {
             const wasmFlags = exp.checkCollisions(
                 c.y, c.r, c.lane, c.color, c.topH, c.topC, c.botH, c.botC, c.canvas
             );
+            assert.equal(wasmFlags, c.expected, `raw flags mismatch for: ${c.label}`);
             const wasmParsed = parseCollisionFlags(wasmFlags);
             const jsParsed = jsCheckCollisions(
                 { y: c.y, radius: c.r, lane: c.lane, colorIdx: c.color },
@@ -65,7 +91,7 @@ describe('WASM / JS fallback parity', () => {
                 { height: c.botH, colorIdx: c.botC },
                 c.canvas
             );
-            assert.deepEqual(wasmParsed, jsParsed);
+            assert.deepEqual(wasmParsed, jsParsed, `parsed flags mismatch for: ${c.label}`);
         }
     });
 
@@ -73,7 +99,8 @@ describe('WASM / JS fallback parity', () => {
         const cases = [
             [120, 40, 10],
             [15, 30, 10],
-            [50, 5, 10]
+            [50, 5, 10],
+            [8, 50, 10]
         ];
         for (const [h, shrink, min] of cases) {
             assertClose(exp.calculateMatchHeight(h, shrink, min), jsCalculateMatchHeight(h, shrink, min));

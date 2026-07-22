@@ -1,6 +1,6 @@
 /** @import { RendererHost } from './RendererHost.js' */
 
-import { COLORS, GAME_CONFIG, PARTICLE_LOD, shouldDrawParticleWithStride } from '../RendererConstants.js';
+import { PARTICLE_LOD, shouldDrawParticleWithStride } from '../RendererConstants.js';
 
 export class ParticleRenderer {
     /** @param {RendererHost} host */

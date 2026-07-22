@@ -274,7 +274,7 @@ export class CaveRenderer {
             }
         }
 
-        drawEnvironmentalParticles(particles, gameState, timestamp) {
+        drawEnvironmentalParticles(particles, gameState, _timestamp) {
             if (!particles || particles.length === 0) return;
             const ctx = this.host.ctx;
             const profile = this.host.getQualityProfile(gameState.renderQuality);

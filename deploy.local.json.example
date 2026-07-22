@@ -1,0 +1,7 @@
+{
+  "project_name": "cave-crystals",
+  "build_dir": "dist",
+  "contabo_base_url": "https://storage.noahcohn.com",
+  "deploy_folder": "",
+  "deploy_token": "paste-your-deploy-token-here"
+}

@@ -2,37 +2,185 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#080c1c">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Spore Hunter">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
     <title>Crystal Cave Spore Hunter</title>
 </head>
 <body>
     <div id="gameContainer">
         <canvas id="gameCanvas"></canvas>
+        <canvas id="postOverlayCanvas"></canvas>
         <div id="uiLayer">
             <div class="hud-panel">
                 <div id="scoreBoard">Score: <span id="scoreVal">0</span></div>
-                <div id="levelDisplay">Level: <span id="levelVal">1</span></div>
+                <div id="levelHud">
+                    <div id="levelDisplay">Level: <span id="levelVal">1</span> <span id="levelName" class="level-name"></span></div>
+                    <div id="objectiveDisplay">
+                        <div id="objectiveLabel">Objective</div>
+                        <div id="objectiveBar"><div id="objectiveProgress"></div></div>
+                    </div>
+                </div>
             </div>
 
             <div id="startScreen">
                 <h1>Crystal Cave<br>Spore Hunter</h1>
                 <p>Shoot spores to match the crystal colors!</p>
-                <div id="qualityControl">
-                    <label for="qualitySelect">Graphics:</label>
-                    <select id="qualitySelect">
-                        <option value="auto" selected>Auto</option>
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="dev">Dev (perf HUD)</option>
-                    </select>
+                <div id="startControls" class="settings-panel">
+                    <div class="settings-section">
+                        <div id="modeControl">
+                            <label for="modeSelectStart">Mode:</label>
+                            <select id="modeSelectStart" data-setting="gameMode">
+                                <option value="campaign" selected>Campaign</option>
+                                <option value="endless">Endless</option>
+                            </select>
+                        </div>
+                        <div id="qualityControl">
+                            <label for="qualitySelectStart">Graphics:</label>
+                            <select id="qualitySelectStart" data-setting="graphics">
+                                <option value="auto" selected>Auto</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="dev">Dev (perf HUD)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-heading">Accessibility</div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="reducedMotion"> Reduced motion
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="colorBlindMode"> Color-blind palette + shapes
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="showTutorial" checked> Show tutorial
+                        </label>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-heading">Input</div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="input.keyboard" checked> Keyboard
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="input.gamepad" checked> Gamepad
+                        </label>
+                    </div>
+                    <div class="settings-section audio-controls">
+                        <div class="settings-heading">Audio</div>
+                        <div class="audio-control">
+                            <label>Master:</label>
+                            <input type="range" data-audio="master" min="0" max="100" value="80">
+                            <span data-audio-label="master">80%</span>
+                        </div>
+                        <div class="audio-control">
+                            <label>Music:</label>
+                            <input type="range" data-audio="music" min="0" max="100" value="50">
+                            <span data-audio-label="music">50%</span>
+                        </div>
+                        <div class="audio-control">
+                            <label>SFX:</label>
+                            <input type="range" data-audio="sfx" min="0" max="100" value="80">
+                            <span data-audio-label="sfx">80%</span>
+                        </div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-audio="mute"> Mute
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-audio="reduced"> Reduced audio intensity
+                        </label>
+                    </div>
                 </div>
-                <button id="startBtn">START</button>
+                <div id="startActions">
+                    <button id="startBtn">START</button>
+                    <button id="fullscreenBtn" type="button" class="secondary-btn">FULLSCREEN</button>
+                </div>
+            </div>
+
+            <div id="pauseScreen" class="hidden">
+                <h1>PAUSED</h1>
+                <p class="controls-hint">←/→ or A/D aim · Space shoot · Esc pause · E power-up</p>
+                <div class="settings-panel">
+                    <div class="settings-section">
+                        <div class="settings-row">
+                            <label for="modeSelectPause">Mode:</label>
+                            <select id="modeSelectPause" data-setting="gameMode">
+                                <option value="campaign" selected>Campaign</option>
+                                <option value="endless">Endless</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <label for="qualitySelectPause">Graphics:</label>
+                            <select id="qualitySelectPause" data-setting="graphics">
+                                <option value="auto" selected>Auto</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="dev">Dev (perf HUD)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-heading">Accessibility</div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="reducedMotion"> Reduced motion
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="colorBlindMode"> Color-blind palette + shapes
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="showTutorial" checked> Show tutorial
+                        </label>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-heading">Input</div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="input.keyboard" checked> Keyboard
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-setting="input.gamepad" checked> Gamepad
+                        </label>
+                    </div>
+                    <div class="settings-section audio-controls">
+                        <div class="settings-heading">Audio</div>
+                        <div class="audio-control">
+                            <label>Master:</label>
+                            <input type="range" data-audio="master" min="0" max="100" value="80">
+                            <span data-audio-label="master">80%</span>
+                        </div>
+                        <div class="audio-control">
+                            <label>Music:</label>
+                            <input type="range" data-audio="music" min="0" max="100" value="50">
+                            <span data-audio-label="music">50%</span>
+                        </div>
+                        <div class="audio-control">
+                            <label>SFX:</label>
+                            <input type="range" data-audio="sfx" min="0" max="100" value="80">
+                            <span data-audio-label="sfx">80%</span>
+                        </div>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-audio="mute"> Mute
+                        </label>
+                        <label class="audio-toggle">
+                            <input type="checkbox" data-audio="reduced"> Reduced audio intensity
+                        </label>
+                    </div>
+                </div>
+                <button id="resumeBtn">RESUME</button>
             </div>
 
             <div id="gameOverScreen" class="hidden">
-                <h1>GAME OVER</h1>
+                <h1 id="gameOverTitle">GAME OVER</h1>
                 <p>Final Score: <span id="finalScore">0</span></p>
+                <p>High Score: <span id="highScoreVal">0</span></p>
+                <p>Best Combo: <span id="bestComboVal">0</span></p>
+                <p>Accuracy: <span id="accuracyVal">0%</span></p>
                 <button id="restartBtn">RESTART</button>
             </div>
 
@@ -41,7 +189,25 @@
                 <div id="nextSporePreview"></div>
             </div>
 
+            <div id="powerUpPanel">
+                <div id="powerUpHud"></div>
+                <button id="powerUpActivateBtn" class="hidden" type="button">USE SHOCK (E)</button>
+            </div>
+
             <div id="fpsCounter">-- FPS</div>
+        </div>
+
+        <div id="tutorialLayer" class="hidden" aria-live="polite">
+            <div id="tutorialSpotlights"></div>
+            <div id="tutorialCard">
+                <p id="tutorialText"></p>
+                <div id="tutorialActions">
+                    <label class="tutorial-dismiss-label">
+                        <input type="checkbox" id="tutorialDismissForever"> Don't show again
+                    </label>
+                    <button id="tutorialSkipBtn" type="button">Skip</button>
+                </div>
+            </div>
         </div>
     </div>
     <script type="module" src="/src/main.js"></script>

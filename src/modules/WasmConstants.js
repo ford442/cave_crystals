@@ -14,6 +14,10 @@ export const TRAIL_BATCH_STRIDE = 6;
 export const TRAIL_BATCH_MAX = 512;
 export const TRAIL_BATCH_FLOAT_COUNT = TRAIL_BATCH_MAX * TRAIL_BATCH_STRIDE;
 
+/** Dust batch buffer layout (JS-only; see particleBatchCodec.js). */
+export const DUST_BATCH_STRIDE = 8;
+export const DUST_BATCH_MAX = 200;
+
 /** Exports WasmManager and ABI tests expect on build/release.wasm. */
 export const REQUIRED_WASM_EXPORTS = [
     'memory',
@@ -34,4 +38,18 @@ export const REQUIRED_WASM_EXPORTS = [
     'calculateHomingVx',
     'calculateHomingVy',
     'getBounceVy'
+];
+
+/**
+ * WASM exports WasmManager delegates to at runtime (subset of release.d.ts).
+ * Contract-tested in test/wasm/bindings-contract.test.mjs.
+ */
+export const WASM_MANAGER_WASM_EXPORTS = [
+    ...REQUIRED_WASM_EXPORTS,
+    'getShatterVx',
+    'getShatterVy',
+    'getDirectionalVx',
+    'getDirectionalVy',
+    'getSpiralVx',
+    'getSpiralVy',
 ];

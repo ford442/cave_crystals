@@ -1,6 +1,6 @@
 /** @import { RendererHost } from './RendererHost.js' */
 
-import { COLORS, GAME_CONFIG, PARTICLE_LOD, shouldDrawParticleWithStride } from '../RendererConstants.js';
+import { DEFAULT_PALETTE, drawColorShape } from '../ColorPalettes.js';
 
 export class HudEffectsRenderer {
     /** @param {RendererHost} host */
@@ -134,6 +134,7 @@ export class HudEffectsRenderer {
                 targets.push(gameState.crystals[i]);
             }
         }
+        const palette = this.host.activePalette || DEFAULT_PALETTE;
         const nextColorIdx = gameState.nextSporeColorIdx;
         const time = timestamp;
     
@@ -149,8 +150,7 @@ export class HudEffectsRenderer {
         const beamX = targetLaneX;
     
         if (hasMatch) {
-            // MATCH: High Energy Beam
-            const col = COLORS[nextColorIdx].hex;
+            const col = palette[nextColorIdx].hex;
             this.host.ctx.strokeStyle = col;
             this.host.ctx.lineWidth = 3;
             this.host.ctx.shadowColor = col;
@@ -198,23 +198,26 @@ export class HudEffectsRenderer {
                  const scale = 1.0 + Math.sin(time / 50) * 0.2;
                  this.host.ctx.rotate(spin);
                  this.host.ctx.scale(scale, scale);
-    
-                 this.host.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+
+                 const paletteCol = palette[c.colorIdx];
+                 this.host.ctx.strokeStyle = paletteCol.hex;
                  this.host.ctx.lineWidth = 3;
-                 this.host.ctx.shadowColor = COLORS[c.colorIdx].hex;
+                 this.host.ctx.shadowColor = paletteCol.hex;
                  this.host.ctx.shadowBlur = 10;
-    
-                 // Draw Bracket
+
                  this.host.ctx.beginPath();
-                 this.host.ctx.arc(0, 0, 30, 0, Math.PI * 2); // Full ring for match
+                 this.host.ctx.arc(0, 0, 30, 0, Math.PI * 2);
                  this.host.ctx.stroke();
-    
-                 // Inner crosshair
-                 this.host.ctx.beginPath();
-                 this.host.ctx.moveTo(-10, 0); this.host.ctx.lineTo(10, 0);
-                 this.host.ctx.moveTo(0, -10); this.host.ctx.lineTo(0, 10);
-                 this.host.ctx.stroke();
-    
+
+                 if (this.host.colorBlindMode) {
+                     drawColorShape(this.host.ctx, paletteCol.shape, 0, 0, 18, '#fff', paletteCol.hex);
+                 } else {
+                     this.host.ctx.beginPath();
+                     this.host.ctx.moveTo(-10, 0); this.host.ctx.lineTo(10, 0);
+                     this.host.ctx.moveTo(0, -10); this.host.ctx.lineTo(0, 10);
+                     this.host.ctx.stroke();
+                 }
+
              } else {
                  // No match - Warning/Scanning
                  const spin = time / 1000; // Slow spin
@@ -240,7 +243,7 @@ export class HudEffectsRenderer {
              this.host.ctx.lineTo(cX + shakeX, tipY);
     
              if (isMatch) {
-                 this.host.ctx.strokeStyle = COLORS[c.colorIdx].hex;
+                 this.host.ctx.strokeStyle = palette[c.colorIdx].hex;
                  this.host.ctx.globalAlpha = 0.6;
                  this.host.ctx.lineWidth = 2;
              } else {
@@ -353,8 +356,10 @@ export class HudEffectsRenderer {
     }
 
     drawSpore(s, timestamp) {
-        const col = COLORS[s.colorIdx];
+        const palette = this.host.activePalette || DEFAULT_PALETTE;
+        const col = palette[s.colorIdx];
         const time = timestamp;
+        const isRainbow = Boolean(s.modifiers?.rainbow);
     
         // Elastic spawn scale — with slight overshoot for extra juiciness
         let scale = 1.0;
@@ -382,8 +387,10 @@ export class HudEffectsRenderer {
         this.host.ctx.rotate(spin);
     
         this.host.ctx.shadowBlur = 20;
-        this.host.ctx.shadowColor = col.hex;
-        this.host.ctx.fillStyle = '#fff';
+        this.host.ctx.shadowColor = isRainbow
+            ? `hsl(${(time / 8) % 360}, 100%, 70%)`
+            : col.hex;
+        this.host.ctx.fillStyle = isRainbow ? '#ffffff' : '#fff';
     
         // Draw Core (4-pointed Star shape)
         const coreSize = baseRadius * 0.8;
@@ -459,7 +466,11 @@ export class HudEffectsRenderer {
             this.host.ctx.stroke();
             this.host.ctx.restore();
         }
-    
+
+        if (!isRainbow && col.shape) {
+            drawColorShape(this.host.ctx, col.shape, 0, 0, baseRadius * 0.9, '#fff', col.hex);
+        }
+
         this.host.ctx.restore();
         this.host.ctx.shadowBlur = 0;
     }
@@ -486,7 +497,11 @@ export class HudEffectsRenderer {
             `timeScale ${(gameState.timeScale || 1).toFixed(2)} · critical ${(gameState.criticalIntensity || 0).toFixed(2)}`,
             `adapt stride+${(overrides.particleStrideBoost || 0).toFixed(1)} fx ${(overrides.effectScale || 1).toFixed(2)}`,
             `update ${(m.particleUpdateMs || 0).toFixed(2)}ms · draw ${(m.particleDrawMs || 0).toFixed(2)}ms`,
+            `integrator ${m.particleIntegratorPath || 'idle'} · worker ${(m.particleWorkerMs || 0).toFixed(2)}ms · backlog ${m.particleWorkerBacklog || 0}`,
             `distort ${(m.distortionPrecomputeMs || 0).toFixed(2)}ms · cells ${m.distortionGridCells || 0}`,
+            ...(typeof this.host._desynchronizedActive === 'boolean'
+                ? [`Canvas desync: ${this.host._desynchronizedActive ? 'ON' : 'OFF'}`]
+                : []),
             '[P] toggle · __toggleDevPerf__()'
         ];
 

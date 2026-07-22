@@ -1,18 +1,36 @@
 import os
 import sys
-import time
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from server import CHROMIUM_ARGS, DistServer, report_screenshot
+from screenshot_utils import (
+    advance,
+    capture_deterministic_screenshot,
+    new_deterministic_page,
+)
+from server import CHROMIUM_ARGS, DistServer
+
+NORMALIZE_CRITICAL_JS = """
+() => {
+    const g = window.game;
+    if (!g) return;
+    g.state.criticalIntensity = 1.0;
+    for (const c of g.state.crystals) {
+        c.height = 45;
+        c.scaleX = 1.0;
+        c.scaleY = 1.0;
+        c.isCritical = true;
+    }
+}
+"""
 
 
 def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
 
             page.on("console", lambda msg: print(f"Browser console: {msg.text}"))
             page.on("pageerror", lambda msg: print(f"Browser error: {msg}"))
@@ -23,17 +41,16 @@ def run():
 
             print("Clicking Start Button")
             page.click("#startBtn")
-            time.sleep(1.0)
+            advance(page, 500)
 
             print("Injecting Critical State...")
-            page.evaluate("() => { window.game.state.criticalIntensity = 1.0; }")
+            page.evaluate(NORMALIZE_CRITICAL_JS)
 
-            # Pulse is sin(time/200), period ~1200ms; wait so pulse > 0.8
-            time.sleep(0.5)
-
-            screenshot_path = "verification/verify_critical_vignette.png"
-            page.screenshot(path=screenshot_path)
-            report_screenshot(screenshot_path)
+            capture_deterministic_screenshot(
+                page,
+                "verification/verify_critical_vignette.png",
+                timestamp=1_000_200,
+            )
 
             browser.close()
 

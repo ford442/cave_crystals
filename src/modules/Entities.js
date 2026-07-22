@@ -1,3 +1,4 @@
+// @ts-check
 /** @import {
     CrystalType,
     ParticleType,
@@ -12,9 +13,7 @@
 } from './types.js' */
 
 import { COLORS, GAME_CONFIG } from './Constants.js';
-import { SoundManager } from './Audio.js';
-import { wasmManager } from './WasmManager.js';
-import { easeOutBack, springStep } from './easing.js';
+import { springStep } from './easing.js';
 
 export class Crystal {
     /**
@@ -154,12 +153,21 @@ export class Crystal {
 }
 
 export class Spore {
-    constructor(x, y, lane, colorIdx) {
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @param {number} lane
+   * @param {number} colorIdx
+   * @param {import('./types.js').SporeModifiers} [modifiers]
+   */
+    constructor(x, y, lane, colorIdx, modifiers = {}) {
         this.x = x;
         this.y = y;
         this.lane = lane;
         this.radius = 10;
         this.colorIdx = colorIdx;
+        /** @type {import('./types.js').SporeModifiers} */
+        this.modifiers = modifiers;
         this.active = true;
         this.spawnTime = performance.now(); // For elastic animation
         this.maxRadius = 10; // Will be set by expansion, but starts small visually
@@ -195,96 +203,37 @@ export class Spore {
         /** @type {CreateTrailCallback | undefined} */ createTrailCallback,
         /** @type {CreateDebrisCallback | undefined} */ createDebrisCallback,
         /** @type {CreateChunkCallback | undefined} */ createChunkCallback,
-        timeScale = 1.0
+        timeScale = 1.0,
+        /** @type {import('./systems/CollisionSystem.js').CollisionSystem | undefined} */ collisionSystem
     ) {
         if (!this.active) return;
 
-        // Track in-flight age for wobble animation
         this.inFlightAge += timeScale;
 
-        // Visual Juice: Emit trail particles
         if (createTrailCallback && Math.random() < 0.7 * timeScale) {
-             createTrailCallback(this.x, this.y, COLORS[this.colorIdx].hex);
+             const trailColor = this.modifiers.rainbow
+                 ? `hsl(${(this.inFlightAge * 12) % 360}, 100%, 70%)`
+                 : COLORS[this.colorIdx].hex;
+             createTrailCallback(this.x, this.y, trailColor);
         }
 
         this.radius += GAME_CONFIG.sporeExpandRate * timeScale;
 
-        if (!topCry || !botCry) return;
+        if (!topCry || !botCry || !collisionSystem) return;
 
-        // Use WASM for collision detection
-        const collision = wasmManager.checkCollisions(this, topCry, botCry, height);
-
-        let hitOccurred = false;
-
-        if (collision.topHit) {
-            hitOccurred = true;
-            if (collision.topMatch) {
-                SoundManager.match();
-                topCry.height = wasmManager.calculateMatchHeight(topCry.height, GAME_CONFIG.matchShrink, 10);
-                topCry.flash = 1;
-                topCry.matchFlash = 1.0; // Energized sheen on match
-                // JUICE: Squash on impact
-                topCry.velScaleY -= 0.3; // Compress vertical
-                topCry.velScaleX += 0.2; // Expand horizontal
-
-                // Create particles at impact point (Spray DOWN)
-                createParticlesCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 40, Math.PI / 2, 1.2, 'shard');
-                // JUICE: Create Heavy Debris (Spray DOWN)
-                if (createDebrisCallback) createDebrisCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 4, Math.PI / 2);
-                // JUICE: Create Massive Severed Chunk (Fall DOWN)
-                if (createChunkCallback) createChunkCallback(this.x, topCry.height, COLORS[this.colorIdx].hex, 1);
-
-                if (createShockwaveCallback) createShockwaveCallback(this.x, topCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true, this.x, topCry.height, COLORS[this.colorIdx].hex); // Added coordinates for floating text
-                topCry.colorIdx = Math.floor(Math.random() * COLORS.length);
-            } else {
-                SoundManager.mismatch();
-                topCry.height = wasmManager.calculatePenaltyHeight(topCry.height, GAME_CONFIG.penaltyGrowth);
-
-                // JUICE: Wobble on mismatch
-                topCry.velScaleY += 0.1;
-                topCry.velScaleX -= 0.1;
-
-                // Rubble (Spray DOWN, wider spread)
-                createParticlesCallback(this.x, topCry.height, '#777', 15, Math.PI / 2, 2.0);
-                scoreCallback(0, false, this.x, topCry.height, '#555'); // Added coordinates
+        const hitOccurred = collisionSystem.resolveSporeHit(
+            this,
+            topCry,
+            botCry,
+            height,
+            {
+                createParticles: createParticlesCallback,
+                score: scoreCallback,
+                createShockwave: createShockwaveCallback,
+                createDebris: createDebrisCallback,
+                createChunk: createChunkCallback,
             }
-        }
-
-        if (collision.bottomHit) {
-            hitOccurred = true;
-            if (collision.bottomMatch) {
-                SoundManager.match();
-                botCry.height = wasmManager.calculateMatchHeight(botCry.height, GAME_CONFIG.matchShrink, 10);
-                botCry.flash = 1;
-                botCry.matchFlash = 1.0; // Energized sheen on match
-                // JUICE: Squash on impact
-                botCry.velScaleY -= 0.3;
-                botCry.velScaleX += 0.2;
-
-                // Create particles at impact point (Spray UP)
-                createParticlesCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 40, -Math.PI / 2, 1.2, 'shard');
-                // JUICE: Create Heavy Debris (Spray UP)
-                if (createDebrisCallback) createDebrisCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, 4, -Math.PI / 2);
-                // JUICE: Create Massive Severed Chunk (Fly UP)
-                if (createChunkCallback) createChunkCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex, -1);
-
-                if (createShockwaveCallback) createShockwaveCallback(this.x, height - botCry.height, COLORS[this.colorIdx].hex);
-                scoreCallback(10, true, this.x, height - botCry.height, COLORS[this.colorIdx].hex); // Added coordinates
-                botCry.colorIdx = Math.floor(Math.random() * COLORS.length);
-            } else {
-                SoundManager.mismatch();
-                botCry.height = wasmManager.calculatePenaltyHeight(botCry.height, GAME_CONFIG.penaltyGrowth);
-
-                // JUICE: Wobble on mismatch
-                botCry.velScaleY += 0.1;
-                botCry.velScaleX -= 0.1;
-
-                // Rubble (Spray UP, wider spread)
-                createParticlesCallback(this.x, height - botCry.height, '#777', 15, -Math.PI / 2, 2.0);
-                scoreCallback(0, false, this.x, height - botCry.height, '#555'); // Added coordinates
-            }
-        }
+        );
 
         if (hitOccurred) {
             this.active = false;

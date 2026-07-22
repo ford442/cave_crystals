@@ -5,3 +5,7 @@ build/
 *.wasm
 *.wat
 __pycache__/
+.env
+.env.*
+!.env.example
+deploy.local.json

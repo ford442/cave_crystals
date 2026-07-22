@@ -1,6 +1,7 @@
 /** @import { GameState, Launcher, RenderQualityLevel, RenderQualityProfile } from './types.js' */
 
 import { resolveParticleStride } from './RendererConstants.js';
+import { DEFAULT_PALETTE } from './ColorPalettes.js';
 import { RendererHost } from './renderers/RendererHost.js';
 import { CrystalRenderer } from './renderers/CrystalRenderer.js';
 import { CaveRenderer } from './renderers/CaveRenderer.js';
@@ -11,9 +12,13 @@ import { ParticleRenderer } from './renderers/ParticleRenderer.js';
 export class Renderer {
     /**
      * @param {HTMLCanvasElement} canvas
+     * @param {HTMLCanvasElement | null} [overlayCanvas]
      */
-    constructor(canvas) {
-        this.host = new RendererHost(canvas);
+    constructor(canvas, overlayCanvas = null) {
+        const overlay = overlayCanvas || /** @type {HTMLCanvasElement | null} */ (
+            typeof document !== 'undefined' ? document.getElementById('postOverlayCanvas') : null
+        );
+        this.host = new RendererHost(canvas, overlay);
         this.host.crystal = new CrystalRenderer(this.host);
         this.host.cave = new CaveRenderer(this.host);
         this.host.post = new PostEffectsRenderer(this.host);
@@ -62,6 +67,11 @@ export class Renderer {
         // No-op: clear is combined with the dark overlay in draw()
     }
 
+    /** @returns {import('./renderers/PostEffectsRenderer.js').PostEffectsRenderer['postFxBackend']} */
+    get postFxBackend() {
+        return this.post.postFxBackend;
+    }
+
     /**
      * @param {RenderQualityLevel} [quality]
      * @returns {RenderQualityProfile}
@@ -77,8 +87,13 @@ export class Renderer {
      */
     draw(gameState, launcher, timestamp = performance.now()) {
         const { host, crystal, cave, post, hud, particles } = this;
-        if (!host.ctx) return;
         const profile = host.getQualityProfile(gameState.renderQuality);
+        post.syncBackend(profile, gameState);
+        if (!host.ctx) return;
+        const motionScale = gameState.motionScale ?? 1;
+        host.motionScale = motionScale;
+        host.activePalette = gameState.colorPalette || DEFAULT_PALETTE;
+        host.colorBlindMode = Boolean(gameState.colorBlindMode);
 
         host.ctx.fillStyle = 'rgba(0, 0, 10, 1.0)';
         host.ctx.fillRect(0, 0, host.width, host.height);
@@ -88,7 +103,7 @@ export class Renderer {
 
         if (gameState.impactFlash > 0.3) {
             host.ctx.fillStyle = gameState.impactFlashColor || '#000';
-            host.ctx.globalAlpha = gameState.impactFlash * 0.2;
+            host.ctx.globalAlpha = gameState.impactFlash * 0.2 * motionScale;
             host.ctx.fillRect(0, 0, host.width, host.height);
             host.ctx.globalAlpha = 1.0;
         }
@@ -105,8 +120,9 @@ export class Renderer {
         if (gameState.zoom && gameState.zoom > 1.0) {
             const zx = gameState.zoomFocus ? gameState.zoomFocus.x : host.width / 2;
             const zy = gameState.zoomFocus ? gameState.zoomFocus.y : host.height / 2;
+            const zoomAmount = 1 + (gameState.zoom - 1) * motionScale;
             host.ctx.translate(zx, zy);
-            host.ctx.scale(gameState.zoom, gameState.zoom);
+            host.ctx.scale(zoomAmount, zoomAmount);
             host.ctx.translate(-zx, -zy);
         }
 
@@ -114,12 +130,15 @@ export class Renderer {
             const cx = host.width / 2;
             const cy = host.height / 2;
             host.ctx.translate(cx, cy);
-            host.ctx.rotate(gameState.shakeOffset.angle || 0);
+            host.ctx.rotate((gameState.shakeOffset.angle || 0) * motionScale);
             host.ctx.translate(-cx, -cy);
-            host.ctx.translate(gameState.shakeOffset.x || 0, gameState.shakeOffset.y || 0);
+            host.ctx.translate(
+                (gameState.shakeOffset.x || 0) * motionScale,
+                (gameState.shakeOffset.y || 0) * motionScale
+            );
         } else if (gameState.shake > 0) {
-            const dx = (Math.random() - 0.5) * gameState.shake;
-            const dy = (Math.random() - 0.5) * gameState.shake;
+            const dx = (Math.random() - 0.5) * gameState.shake * motionScale;
+            const dy = (Math.random() - 0.5) * gameState.shake * motionScale;
             host.ctx.translate(dx, dy);
         }
 
@@ -157,13 +176,14 @@ export class Renderer {
 
                 if (isWarping) {
                     host.ctx.globalCompositeOperation = 'screen';
+                    const chromaOffset = (4 + (warpMagnitude * 0.2)) * motionScale;
                     host.ctx.save();
-                    host.ctx.translate(-4 - (warpMagnitude * 0.2), 0);
+                    host.ctx.translate(-chromaOffset, 0);
                     hud.drawCursor(gameState, launcher, 'red');
                     host.ctx.restore();
 
                     host.ctx.save();
-                    host.ctx.translate(4 + (warpMagnitude * 0.2), 0);
+                    host.ctx.translate(chromaOffset, 0);
                     hud.drawCursor(gameState, launcher, 'blue');
                     host.ctx.restore();
 
@@ -229,30 +249,61 @@ export class Renderer {
             gameState.perfMetrics.distortionLookupCount = host._distortionLookupCount || 0;
         }
 
-        if (profile.bloom) {
-            post.drawBloom(gameState, profile, timestamp);
-        }
+        const useWebGL = post.usesWebGL(profile, gameState);
 
-        if (profile.lightShafts) {
-            post.drawLightShafts(gameState, launcher, timestamp, profile);
-        }
+        if (useWebGL) {
+            const uniforms = post.buildUniforms(gameState, profile, launcher, timestamp);
+            post.runGpuPass(uniforms, host._sceneCanvas);
 
-        if (profile.colorGrade) {
-            post.drawColorGrade(gameState, timestamp);
-        }
+            if (host.overlayCtx) {
+                host.overlayCtx.clearRect(0, 0, host.width, host.height);
+            }
+            const overlayCtx = host.overlayCtx;
 
-        if (profile.postFX) {
-            post.drawFilmPass(gameState, timestamp, profile);
-        } else if (gameState.criticalIntensity > 0.01) {
-            post.drawVignette(gameState.criticalIntensity, timestamp);
-        }
+            if (profile.lightShafts) {
+                post.drawLightShafts(gameState, launcher, timestamp, profile, overlayCtx);
+            }
+            if (profile.postFX) {
+                post.drawOverlayFilmPass(gameState, timestamp, profile, overlayCtx);
+            } else if (gameState.criticalIntensity > 0.01) {
+                post.drawVignette(gameState.criticalIntensity * motionScale, timestamp, overlayCtx);
+            }
+            if (gameState.impactFlash > 0) {
+                post.drawImpactFlash(gameState.impactFlash * motionScale, gameState.impactFlashColor, overlayCtx);
+            }
+        } else {
+            if (profile.bloom) {
+                post.drawBloom(gameState, profile);
+            }
 
-        if (gameState.impactFlash > 0) {
-            post.drawImpactFlash(gameState.impactFlash, gameState.impactFlashColor);
+            if (profile.lightShafts) {
+                post.drawLightShafts(gameState, launcher, timestamp, profile);
+            }
+
+            if (profile.colorGrade) {
+                post.drawColorGrade(gameState, timestamp);
+            }
+
+            if (profile.postFX) {
+                post.drawFilmPass(gameState, timestamp, profile);
+            } else if (gameState.criticalIntensity > 0.01) {
+                post.drawVignette(gameState.criticalIntensity * motionScale, timestamp);
+            }
+
+            if (gameState.impactFlash > 0) {
+                post.drawImpactFlash(gameState.impactFlash * motionScale, gameState.impactFlashColor);
+            }
         }
 
         if (gameState.devPerfOverlay) {
-            hud.drawDevMetricsOverlay(gameState, profile);
+            if (useWebGL && host.overlayCtx) {
+                const prevCtx = host.ctx;
+                host.ctx = host.overlayCtx;
+                hud.drawDevMetricsOverlay(gameState, profile);
+                host.ctx = prevCtx;
+            } else {
+                hud.drawDevMetricsOverlay(gameState, profile);
+            }
         }
     }
 }

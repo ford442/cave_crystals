@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "seed": 12345,
+  "recordedAt": "2026-07-22T06:23:07.598Z",
+  "config": {
+    "gameMode": "campaign",
+    "graphics": "high",
+    "levelIndex": 0
+  },
+  "events": [
+    {
+      "t": 0,
+      "type": "start"
+    },
+    {
+      "t": 512,
+      "type": "aim",
+      "lane": 1
+    },
+    {
+      "t": 512,
+      "type": "fire"
+    },
+    {
+      "t": 1952,
+      "type": "milestone",
+      "kind": "match",
+      "lane": 1,
+      "score": 0
+    },
+    {
+      "t": 10528,
+      "type": "aim",
+      "lane": 3
+    },
+    {
+      "t": 10528,
+      "type": "fire"
+    },
+    {
+      "t": 11808,
+      "type": "milestone",
+      "kind": "match",
+      "lane": 3,
+      "score": 10
+    },
+    {
+      "t": 20544,
+      "type": "aim",
+      "lane": 0
+    },
+    {
+      "t": 20544,
+      "type": "fire"
+    },
+    {
+      "t": 21728,
+      "type": "milestone",
+      "kind": "match",
+      "lane": 0,
+      "score": 20
+    },
+    {
+      "t": 30560,
+      "type": "aim",
+      "lane": 1
+    },
+    {
+      "t": 30560,
+      "type": "fire"
+    },
+    {
+      "t": 31648,
+      "type": "milestone",
+      "kind": "match",
+      "lane": 1,
+      "score": 30
+    },
+    {
+      "t": 40576,
+      "type": "aim",
+      "lane": 0
+    },
+    {
+      "t": 40576,
+      "type": "fire"
+    },
+    {
+      "t": 50592,
+      "type": "fire"
+    },
+    {
+      "t": 51232,
+      "type": "milestone",
+      "kind": "match",
+      "lane": 0,
+      "score": 40
+    }
+  ],
+  "expect": {
+    "finalScore": 50,
+    "tolerance": 0
+  }
+}
