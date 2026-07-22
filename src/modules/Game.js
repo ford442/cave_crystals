@@ -18,6 +18,7 @@ import { ProgressionManager } from './ProgressionManager.js';
 import { PowerUpManager } from './PowerUpManager.js';
 import { POWER_UPS, POWER_UP_TYPES } from './PowerUpDefinitions.js';
 import { TutorialManager } from './TutorialManager.js';
+import { BossController } from './BossController.js';
 import * as gameplayRng from './GameplayRng.js';
 import { ReplayRecorder } from './ReplayRecorder.js';
 import { ReplayPlayer } from './ReplayPlayer.js';
@@ -48,6 +49,7 @@ export class Game {
         this.background = new Background();
         this.progression = new ProgressionManager();
         this.powerUps = new PowerUpManager();
+        this.boss = new BossController();
         this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
         this.renderer = new Renderer(this.canvas);
         this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
@@ -161,6 +163,7 @@ export class Game {
             colorBlindMode: false,
             colorPalette: DEFAULT_PALETTE,
             gameClockMs: 0,
+            boss: null,
         };
 
         this.replay = {
@@ -169,6 +172,8 @@ export class Game {
         };
 
         this._sessionBestCombo = 0;
+        /** @type {number} */
+        this._lastShotAt = 0;
 
         // Object pools for high-frequency particles (reduces GC pressure)
         this.particlePool = new ParticlePool(
@@ -371,6 +376,9 @@ export class Game {
             this.progression.levelIndex = Math.min(config.levelIndex, 4);
         }
         this.powerUps.reset();
+        this.boss.reset();
+        this.state.boss = null;
+        this._lastShotAt = 0;
 
         this.state.active = true;
         this.state.paused = false;
@@ -445,6 +453,98 @@ export class Game {
         this.updateUI();
         this.updatePowerUpHud();
         this.initCrystals();
+        this._maybeStartBoss();
+    }
+
+    /**
+     * Start a boss encounter when the active level declares a bossId.
+     * @param {string} [forceBossId]
+     */
+    _maybeStartBoss(forceBossId) {
+        this.boss.reset();
+        this.state.boss = null;
+        const cfg = this.progression.getActiveConfig();
+        const bossId = forceBossId
+            || /** @type {import('./types.js').LevelDefinition} */ (cfg).bossId;
+        if (!bossId || this.progression.isEndless()) return;
+
+        const seed = (gameplayRng.next() * 0xffffffff) >>> 0;
+        const lanes = this.progression.getSpawnConfig().lanes;
+        if (!this.boss.start(bossId, { seed, lanes })) return;
+
+        this.boss.applyFormationToCrystals(
+            this.state.crystals,
+            this.progression.getSpawnConfig().colorCount
+        );
+        this.state.boss = this.boss.getHudState();
+        SoundManager.bossSting();
+        const name = this.boss.definition?.name || 'BOSS';
+        this.createFloatingText(
+            this.renderer.width / 2,
+            this.renderer.height * 0.28,
+            name.toUpperCase(),
+            this.boss.definition?.colors?.primary || '#FF4466',
+            2.6
+        );
+        this.createShockwave(
+            this.renderer.width / 2,
+            this.renderer.height / 2,
+            this.boss.definition?.colors?.telegraph || '#FF8800'
+        );
+    }
+
+    /**
+     * Test/debug hook: force-start a boss mid-session (used by verify_boss_encounter.py).
+     * @param {string} [bossId]
+     */
+    forceStartBoss(bossId = 'convergence') {
+        if (!this.state.active) {
+            this.startGame();
+        }
+        // Jump campaign to the boss level when possible
+        const defLevel = /** @type {import('./types.js').LevelDefinition | undefined} */ (
+            this.progression.getActiveConfig()
+        );
+        if (!this.progression.isEndless() && defLevel && !defLevel.bossId) {
+            // Find level index with matching boss
+            this.progression.levelIndex = 4; // Level 5 — The Convergence
+            this.beginCurrentLevel();
+            if (this.boss.isBusy()) return true;
+        }
+        this._maybeStartBoss(bossId);
+        return this.boss.isBusy();
+    }
+
+    handleBossDefeat() {
+        const def = this.boss.definition;
+        const rewards = def?.rewards || {};
+        const color = def?.colors?.secondary || '#FFD700';
+
+        SoundManager.bossDefeat();
+        this.state.score += rewards.scoreBonus || 0;
+        const rainbows = rewards.rainbowCount || 0;
+        for (let i = 0; i < rainbows; i++) {
+            this.grantPowerUp(POWER_UP_TYPES.RAINBOW);
+        }
+
+        this.state.shake = Math.max(this.state.shake, 35 * this.state.motionScale);
+        this.state.impactFlash = 0.9 * this.state.motionScale;
+        this.state.impactFlashColor = color;
+        this.state.targetTimeScale = 0.08;
+        this.state.slowMoTimer = 1600;
+        this.createShockwave(this.renderer.width / 2, this.renderer.height / 2, color);
+        this.createShockwave(this.renderer.width / 2, this.renderer.height / 2, def?.colors?.primary || '#FF4466');
+        this.createFloatingText(
+            this.renderer.width / 2,
+            this.renderer.height / 2,
+            'BOSS DEFEATED!',
+            color,
+            3.2
+        );
+
+        this.state.boss = null;
+        this.boss.reset();
+        this.handleLevelComplete();
     }
 
     applyLevelConfig() {
@@ -551,6 +651,15 @@ export class Game {
     shootSpore(options = {}) {
         if (!this.state.active || this.state.paused) return;
         if (this.replay.player.isActive() && !options.fromReplay) return;
+
+        const fireMul = this.boss.getFireRateMultiplier();
+        if (fireMul < 1 && !options.fromReplay) {
+            const now = this.state.gameClockMs || 0;
+            const minInterval = 220 / fireMul;
+            if (now - this._lastShotAt < minInterval) return;
+            this._lastShotAt = now;
+        }
+
         this.save.recordShot();
         SoundManager.shoot();
         this.launcher.fire();
@@ -786,11 +895,22 @@ export class Game {
     /** @type {import('./types.js').SporeScoreCallback} */
     _onSporeScore(points, isMatch, x, y, color) {
         if (isMatch) {
+            const lane = Math.min(
+                Math.max(0, Math.floor(x / Math.max(1, this.renderer.laneWidth))),
+                GAME_CONFIG.lanes - 1
+            );
             this.replay.recorder.onMilestone(this, {
                 kind: 'match',
-                lane: this.launcher.targetLane,
+                lane,
                 score: this.state.score,
             });
+            if (this.boss.isActive()) {
+                const dmg = this.boss.onMatch(lane, true);
+                if (dmg > 0) {
+                    this.createFloatingText(x, y - 30, 'HIT!', this.boss.definition?.colors?.vulnerable || '#44FFAA', 1.8);
+                    this.state.shake = Math.max(this.state.shake, 12 * this.state.motionScale);
+                }
+            }
         }
         return this.systems.combo.handleSporeScore(points, isMatch, x, y, color);
     }

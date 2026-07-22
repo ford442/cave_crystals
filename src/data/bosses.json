@@ -1,0 +1,53 @@
+{
+  "bosses": [
+    {
+      "id": "convergence",
+      "name": "The Convergence",
+      "triggerLevelId": 5,
+      "colors": {
+        "primary": "#FF4466",
+        "secondary": "#FFD700",
+        "telegraph": "#FF8800",
+        "vulnerable": "#44FFAA"
+      },
+      "hp": 6,
+      "introMs": 2800,
+      "defeatMs": 2200,
+      "fireRateMultiplier": 0.7,
+      "colorLockAlternating": true,
+      "phases": [
+        {
+          "id": "pulse_center",
+          "formationPhase": 0,
+          "telegraphMs": 1800,
+          "surgeMs": 900,
+          "vulnerableMs": 4500,
+          "surgeGrowth": 0.55,
+          "idleGrowth": 0.04
+        },
+        {
+          "id": "ridge_lock",
+          "formationPhase": 1,
+          "telegraphMs": 1600,
+          "surgeMs": 1000,
+          "vulnerableMs": 4200,
+          "surgeGrowth": 0.65,
+          "idleGrowth": 0.05
+        },
+        {
+          "id": "edge_collapse",
+          "formationPhase": 2,
+          "telegraphMs": 1400,
+          "surgeMs": 1100,
+          "vulnerableMs": 5000,
+          "surgeGrowth": 0.75,
+          "idleGrowth": 0.06
+        }
+      ],
+      "rewards": {
+        "scoreBonus": 500,
+        "rainbowCount": 2
+      }
+    }
+  ]
+}

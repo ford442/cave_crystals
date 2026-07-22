@@ -354,6 +354,39 @@ export const SoundManager = {
         this.scheduleTone(1320, 'sine', 0.25, 0.1, 0.08, this.sfxGain);
     },
 
+    /** Boss intro / telegraph sting — low brass-like stack with a rising edge. */
+    bossSting() {
+        if (!this.ctx || !this.uiGain) return;
+        const t0 = this.ctx.currentTime;
+        const freqs = [110, 165, 220, 330];
+        freqs.forEach((freq, i) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            const vol = this._intensityVol(0.22 - i * 0.03);
+            osc.type = i < 2 ? 'sawtooth' : 'triangle';
+            osc.frequency.setValueAtTime(freq, t0);
+            osc.frequency.linearRampToValueAtTime(freq * 1.5, t0 + 0.45);
+            gain.gain.setValueAtTime(0.001, t0);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.01, vol), t0 + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, t0 + 0.7);
+            osc.connect(gain);
+            gain.connect(this.uiGain);
+            this._trackVoice(this.uiGain, osc, gain);
+            osc.start(t0);
+            osc.stop(t0 + 0.75);
+        });
+    },
+
+    /** Victory sting when a boss is defeated. */
+    bossDefeat() {
+        if (!this.ctx || !this.uiGain) return;
+        const freqs = [196, 247, 294, 392, 523];
+        freqs.forEach((freq, i) => {
+            this.scheduleTone(freq, i % 2 === 0 ? 'triangle' : 'sine', 0.9, 0.16, i * 0.08, this.uiGain);
+        });
+        this.scheduleTone(784, 'sine', 1.1, 0.12, 0.45, this.uiGain);
+    },
+
     getActiveVoiceCount() {
         return this._activeVoices.size + this.ambient.getLayerCount();
     },

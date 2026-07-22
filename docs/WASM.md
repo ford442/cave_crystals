@@ -7,7 +7,7 @@ Crystal Cave loads WASM through ASC-generated ESM bindings in `build/release.js`
 | Category | Examples | Rationale |
 |----------|----------|-----------|
 | **Batch hot loops** | `batchIntegrateSimpleParticles`, `batchIntegrateTrailParticles` | Many particles per frame; linear memory avoids per-particle JS↔WASM calls |
-| **Deterministic gameplay helpers** | `checkCollisions`, `calculateMatchHeight`, `calculatePenaltyHeight` | Stable ABI; parity-tested against JS fallbacks |
+| **Deterministic gameplay helpers** | `checkCollisions`, `calculateMatchHeight`, `calculatePenaltyHeight`, `generateBossHeights`, `getBossVulnerableMask` | Stable ABI; parity-tested against JS fallbacks |
 | **Scalar physics helpers used at scale** | `getSmokeVx/Vy`, `calculateHomingVx/Vy`, `getBounceVy` | Pure functions; cheap to call but must match fallback math |
 
 ## What stays in JavaScript
@@ -51,6 +51,8 @@ The particle integrator worker (`src/workers/particleIntegrator.worker.js`) load
 Every WASM export used in gameplay has a JS implementation in `WasmFallbacks.js`. If the module fails to load or a call throws, `WasmManager` falls back silently in production (warnings are rate-limited / dev-only).
 
 Gameplay RNG seeding (`setSeed` / `jsSetSeed`) and replay determinism tiers are documented in [`DETERMINISM.md`](./DETERMINISM.md).
+
+Boss formation authoring (`bosses.json`, phase timings, rewards) is documented in [`BOSSES.md`](./BOSSES.md).
 
 ## Contract tests
 

@@ -303,3 +303,101 @@ export function encodeCollisionFlags(topHit, topMatch, bottomHit, bottomMatch) {
     if (bottomMatch) result |= 8;
     return result;
 }
+
+/** Must match src/assembly/formations.ts */
+export const JS_BOSS_HEIGHTS_MAX = 8;
+
+/**
+ * @param {number} seed
+ * @returns {() => number}
+ */
+function createFormRng(seed) {
+    let s = (seed >>> 0) || 1;
+    return () => {
+        s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff;
+        return s / 0x7fffffff;
+    };
+}
+
+/**
+ * Mirror of WASM `generateBossHeights` — returns a new Float64Array of length `lanes`.
+ * @param {number} seed
+ * @param {number} phase
+ * @param {number} lanes
+ * @returns {Float64Array}
+ */
+export function jsGenerateBossHeights(seed, phase, lanes) {
+    const n = Math.max(1, Math.min(JS_BOSS_HEIGHTS_MAX, lanes | 0));
+    const out = new Float64Array(n);
+    const rand = createFormRng(seed >>> 0);
+    const base = 55.0;
+    const amp = 28.0;
+    const mid = (n - 1) * 0.5;
+
+    for (let i = 0; i < n; i++) {
+        const t = mid > 0 ? (i - mid) / mid : 0;
+        let h = base;
+        if (phase === 0) {
+            h = base + amp * (1.0 - Math.abs(t));
+        } else if (phase === 1) {
+            h = base + ((i & 1) === 0 ? amp : -amp * 0.55);
+        } else if (phase === 2) {
+            h = base + amp * Math.abs(t);
+        } else {
+            h = base + amp * 0.35 * Math.sin(i * 1.7 + phase);
+        }
+        h += (rand() - 0.5) * 4.0;
+        if (h < 18.0) h = 18.0;
+        if (h > 120.0) h = 120.0;
+        out[i] = h;
+    }
+
+    const half = n >> 1;
+    for (let i = 0; i < half; i++) {
+        out[n - 1 - i] = out[i];
+    }
+    return out;
+}
+
+/**
+ * @param {number} phase
+ * @param {number} lanes
+ * @returns {number}
+ */
+export function jsGetBossVulnerableMask(phase, lanes) {
+    const n = Math.max(1, Math.min(JS_BOSS_HEIGHTS_MAX, lanes | 0));
+    let mask = 0;
+    if (phase === 0) {
+        for (let i = 0; i < n; i++) {
+            if ((i & 1) !== 0) mask |= 1 << i;
+        }
+    } else if (phase === 1) {
+        for (let i = 0; i < n; i++) {
+            if ((i & 1) === 0) mask |= 1 << i;
+        }
+    } else if (phase === 2) {
+        const mid = n >> 1;
+        mask |= 1 << mid;
+        if ((n & 1) === 0 && mid - 1 >= 0) {
+            mask |= 1 << (mid - 1);
+        }
+    } else {
+        for (let i = 0; i < n; i++) {
+            mask |= 1 << i;
+        }
+    }
+    return mask >>> 0;
+}
+
+/**
+ * @param {number} elapsedMs
+ * @param {number} telegraphMs
+ * @returns {number}
+ */
+export function jsGetBossTelegraphProgress(elapsedMs, telegraphMs) {
+    if (telegraphMs <= 0) return 1;
+    let t = elapsedMs / telegraphMs;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return t;
+}
