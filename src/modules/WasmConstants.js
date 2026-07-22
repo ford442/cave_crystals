@@ -37,8 +37,16 @@ export const REQUIRED_WASM_EXPORTS = [
     'getSmokeVy',
     'calculateHomingVx',
     'calculateHomingVy',
-    'getBounceVy'
+    'getBounceVy',
+    'getBossHeightsByteOffset',
+    'getBossHeightsCapacity',
+    'generateBossHeights',
+    'getBossVulnerableMask',
+    'getBossTelegraphProgress',
 ];
+
+/** Boss height buffer capacity (must match src/assembly/formations.ts). */
+export const BOSS_HEIGHTS_MAX = 8;
 
 /**
  * WASM exports WasmManager delegates to at runtime (subset of release.d.ts).

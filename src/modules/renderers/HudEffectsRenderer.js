@@ -475,6 +475,123 @@ export class HudEffectsRenderer {
         this.host.ctx.shadowBlur = 0;
     }
 
+    /**
+     * Boss HP bar + telegraph ring (interface overlay).
+     * @param {import('../types.js').GameState} gameState
+     * @param {number} timestamp
+     */
+    drawBossEncounter(gameState, timestamp) {
+        const boss = gameState.boss;
+        if (!boss || !boss.active) return;
+
+        const prevAlpha = this.host.ctx.globalAlpha;
+        const cx = this.host.width / 2;
+        const topY = 28;
+        const barW = Math.min(420, this.host.width * 0.55);
+        const barH = 14;
+        const barX = cx - barW / 2;
+        const hpRatio = boss.maxHp > 0 ? Math.max(0, boss.hp / boss.maxHp) : 0;
+        /** @type {import('../types.js').BossColors} */
+        const colors = boss.colors || {
+            primary: '#FF4466',
+            secondary: '#FFD700',
+            telegraph: '#FF8800',
+            vulnerable: '#44FFAA',
+        };
+        const primary = colors.primary || '#FF4466';
+        const secondary = colors.secondary || '#FFD700';
+        const telegraphColor = colors.telegraph || '#FF8800';
+        const vulnerableColor = colors.vulnerable || '#44FFAA';
+
+        // Name
+        this.host.ctx.save();
+        this.host.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.host.ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+        this.host.ctx.textAlign = 'center';
+        this.host.ctx.textBaseline = 'bottom';
+        this.host.ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        this.host.ctx.fillText(boss.name, cx + 1, topY - 4 + 1);
+        this.host.ctx.fillStyle = secondary;
+        this.host.ctx.fillText(boss.name, cx, topY - 4);
+
+        // HP bar background
+        this.host.ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        this.host.ctx.fillRect(barX - 2, topY - 2, barW + 4, barH + 4);
+        this.host.ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        this.host.ctx.lineWidth = 1;
+        this.host.ctx.strokeRect(barX - 2.5, topY - 2.5, barW + 5, barH + 5);
+
+        // HP fill
+        const grad = this.host.ctx.createLinearGradient(barX, topY, barX + barW, topY);
+        grad.addColorStop(0, primary);
+        grad.addColorStop(1, secondary);
+        this.host.ctx.fillStyle = grad;
+        this.host.ctx.fillRect(barX, topY, barW * hpRatio, barH);
+
+        // Phase label
+        this.host.ctx.font = '11px monospace';
+        this.host.ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        this.host.ctx.textBaseline = 'top';
+        const stepLabel = boss.state === 'intro'
+            ? 'INTRO'
+            : boss.state === 'defeat'
+                ? 'DEFEATED'
+                : (boss.phaseStep || '').toUpperCase();
+        this.host.ctx.fillText(
+            `PHASE ${Math.min(boss.phaseIndex + 1, Math.max(1, boss.phaseCount))} / ${Math.max(1, boss.phaseCount)} — ${stepLabel}`,
+            cx,
+            topY + barH + 6
+        );
+
+        // Telegraph ring (center screen)
+        if (boss.telegraph > 0.01 && boss.phaseStep === 'telegraph') {
+            const pulse = 0.5 + 0.5 * Math.sin(timestamp / 90);
+            const radius = 40 + boss.telegraph * 70;
+            this.host.ctx.beginPath();
+            this.host.ctx.arc(cx, this.host.height / 2, radius, 0, Math.PI * 2);
+            this.host.ctx.strokeStyle = telegraphColor;
+            this.host.ctx.globalAlpha = 0.25 + boss.telegraph * 0.55;
+            this.host.ctx.lineWidth = 3 + pulse * 2;
+            this.host.ctx.stroke();
+
+            // Arc progress
+            this.host.ctx.beginPath();
+            this.host.ctx.arc(
+                cx,
+                this.host.height / 2,
+                radius + 10,
+                -Math.PI / 2,
+                -Math.PI / 2 + boss.telegraph * Math.PI * 2
+            );
+            this.host.ctx.strokeStyle = secondary;
+            this.host.ctx.globalAlpha = 0.85;
+            this.host.ctx.lineWidth = 4;
+            this.host.ctx.stroke();
+            this.host.ctx.globalAlpha = 1;
+        }
+
+        // Vulnerable lane markers
+        if (boss.state === 'vulnerable' || boss.phaseStep === 'vulnerable') {
+            const laneW = this.host.laneWidth;
+            for (let lane = 0; lane < boss.lanes; lane++) {
+                if (((boss.vulnerableMask >>> lane) & 1) !== 1) continue;
+                const lx = lane * laneW + laneW / 2;
+                const flicker = 0.45 + 0.55 * Math.sin(timestamp / 70 + lane);
+                this.host.ctx.strokeStyle = vulnerableColor;
+                this.host.ctx.globalAlpha = 0.35 + flicker * 0.4;
+                this.host.ctx.lineWidth = 2;
+                this.host.ctx.beginPath();
+                this.host.ctx.moveTo(lx, 70);
+                this.host.ctx.lineTo(lx, this.host.height - 70);
+                this.host.ctx.stroke();
+            }
+            this.host.ctx.globalAlpha = 1;
+        }
+
+        this.host.ctx.restore();
+        this.host.ctx.globalAlpha = prevAlpha;
+    }
+
     drawDevMetricsOverlay(gameState, profile) {
         const m = gameState.perfMetrics;
         const overrides = gameState.adaptiveOverrides;

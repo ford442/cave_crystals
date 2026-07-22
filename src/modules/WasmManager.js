@@ -18,6 +18,9 @@ import {
     jsCalculateHomingVx,
     jsCalculateHomingVy,
     jsSetSeed,
+    jsGenerateBossHeights,
+    jsGetBossVulnerableMask,
+    jsGetBossTelegraphProgress,
 } from './WasmFallbacks.js';
 import {
     getWasmBatchLayout,
@@ -276,6 +279,62 @@ export class WasmManager {
         }
         const angle = (index / total) * Math.PI * 2;
         return Math.sin(angle) * force - Math.cos(angle) * spiralFactor + (Math.random() - 0.5) * 0.3;
+    }
+
+    /**
+     * Procedural boss lane heights (symmetric). Returns a copied Float64Array.
+     * @param {number} seed
+     * @param {number} phase
+     * @param {number} lanes
+     * @returns {Float64Array}
+     */
+    generateBossHeights(seed, phase, lanes) {
+        const wasm = this.exports;
+        if (this.ready && wasm?.generateBossHeights && wasm.memory) {
+            try {
+                const count = wasm.generateBossHeights(seed >>> 0, phase | 0, lanes | 0);
+                const offset = wasm.getBossHeightsByteOffset();
+                const view = new Float64Array(wasm.memory.buffer, offset, count);
+                return new Float64Array(view);
+            } catch (error) {
+                logWasmFallbackOnce('generateBossHeights', 'WASM boss heights failed, falling back:', error);
+            }
+        }
+        return jsGenerateBossHeights(seed, phase, lanes);
+    }
+
+    /**
+     * @param {number} phase
+     * @param {number} lanes
+     * @returns {number}
+     */
+    getBossVulnerableMask(phase, lanes) {
+        const wasm = this.exports;
+        if (this.ready && wasm?.getBossVulnerableMask) {
+            try {
+                return wasm.getBossVulnerableMask(phase | 0, lanes | 0) >>> 0;
+            } catch (error) {
+                logWasmFallbackOnce('getBossVulnerableMask', 'WASM vulnerable mask failed, falling back:', error);
+            }
+        }
+        return jsGetBossVulnerableMask(phase, lanes);
+    }
+
+    /**
+     * @param {number} elapsedMs
+     * @param {number} telegraphMs
+     * @returns {number}
+     */
+    getBossTelegraphProgress(elapsedMs, telegraphMs) {
+        const wasm = this.exports;
+        if (this.ready && wasm?.getBossTelegraphProgress) {
+            try {
+                return wasm.getBossTelegraphProgress(elapsedMs, telegraphMs);
+            } catch (error) {
+                logWasmFallbackOnce('getBossTelegraphProgress', 'WASM telegraph progress failed, falling back:', error);
+            }
+        }
+        return jsGetBossTelegraphProgress(elapsedMs, telegraphMs);
     }
 
     /**

@@ -55,6 +55,14 @@ export {
     min
 } from './math';
 
+export {
+    getBossHeightsByteOffset,
+    getBossHeightsCapacity,
+    generateBossHeights,
+    getBossVulnerableMask,
+    getBossTelegraphProgress
+} from './formations';
+
 // Module version information
 export const VERSION_MAJOR: i32 = 1;
 export const VERSION_MINOR: i32 = 0;

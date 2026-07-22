@@ -426,6 +426,63 @@
  * @property {Map<number, LaneCrystalPair>} laneMap
  * @property {InstanceType<typeof import('./Entities.js').EnergyRing>[]} energyRings
  * @property {EnvParticle[]} envParticles
+ * @property {BossHudState | null} [boss]
+ */
+
+/**
+ * @typedef {Object} BossColors
+ * @property {string} primary
+ * @property {string} secondary
+ * @property {string} telegraph
+ * @property {string} [vulnerable]
+ */
+
+/**
+ * @typedef {Object} BossPhaseDefinition
+ * @property {string} id
+ * @property {number} formationPhase
+ * @property {number} telegraphMs
+ * @property {number} surgeMs
+ * @property {number} vulnerableMs
+ * @property {number} [surgeGrowth]
+ * @property {number} [idleGrowth]
+ */
+
+/**
+ * @typedef {Object} BossRewards
+ * @property {number} [scoreBonus]
+ * @property {number} [rainbowCount]
+ */
+
+/**
+ * @typedef {Object} BossDefinition
+ * @property {string} id
+ * @property {string} name
+ * @property {number} triggerLevelId
+ * @property {BossColors} colors
+ * @property {number} hp
+ * @property {number} [introMs]
+ * @property {number} [defeatMs]
+ * @property {number} [fireRateMultiplier]
+ * @property {boolean} [colorLockAlternating]
+ * @property {BossPhaseDefinition[]} phases
+ * @property {BossRewards} [rewards]
+ */
+
+/**
+ * @typedef {Object} BossHudState
+ * @property {boolean} active
+ * @property {string} name
+ * @property {number} hp
+ * @property {number} maxHp
+ * @property {number} telegraph
+ * @property {number} phaseIndex
+ * @property {number} phaseCount
+ * @property {string} state
+ * @property {string} phaseStep
+ * @property {BossColors} colors
+ * @property {number} vulnerableMask
+ * @property {number} lanes
  */
 
 /**
@@ -510,6 +567,11 @@
  * @property {(currVx: number, currVy: number, x: number, y: number, tx: number, ty: number, speed: number, agility: number) => number} [calculateHomingVy]
  * @property {(index: number, total: number, force: number, spiralFactor: number) => number} [getSpiralVx]
  * @property {(index: number, total: number, force: number, spiralFactor: number) => number} [getSpiralVy]
+ * @property {() => number} [getBossHeightsByteOffset]
+ * @property {() => number} [getBossHeightsCapacity]
+ * @property {(seed: number, phase: number, lanes: number) => number} [generateBossHeights]
+ * @property {(phase: number, lanes: number) => number} [getBossVulnerableMask]
+ * @property {(elapsedMs: number, telegraphMs: number) => number} [getBossTelegraphProgress]
  * @property {(batchCount: number, timeScale: number, lifeDecay: number) => void} [batchIntegrateSimpleParticles]
  * @property {(batchCount: number, timeScale: number) => void} [batchIntegrateTrailParticles]
  * @property {() => number} [getSimpleBatchByteOffset]
@@ -544,6 +606,9 @@
  * @property {(currVx: number, currVy: number, x: number, y: number, tx: number, ty: number, speed: number, agility: number) => number} calculateHomingVy
  * @property {(index: number, total: number, force: number, spiralFactor: number) => number} getSpiralVx
  * @property {(index: number, total: number, force: number, spiralFactor: number) => number} getSpiralVy
+ * @property {(seed: number, phase: number, lanes: number) => Float64Array} generateBossHeights
+ * @property {(phase: number, lanes: number) => number} getBossVulnerableMask
+ * @property {(elapsedMs: number, telegraphMs: number) => number} getBossTelegraphProgress
  * @property {(ambientParticles: InstanceType<typeof import('./Entities.js').Particle>[], count: number, timeScale: number, rendererWidth: number, rendererHeight: number) => boolean} batchIntegrateAmbientParticles
  * @property {(trailParticles: InstanceType<typeof import('./Entities.js').TrailParticle>[], count: number, timeScale: number, rendererWidth: number, rendererHeight: number) => boolean} batchIntegrateTrailParticles
  */
@@ -622,6 +687,7 @@
  * @property {LevelGrowthConfig} growth
  * @property {LevelObjective} objective
  * @property {string} description
+ * @property {string} [bossId]
  */
 
 /**

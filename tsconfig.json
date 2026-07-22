@@ -9,6 +9,7 @@
     "strict": false,
     "noImplicitAny": false,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "maxNodeModuleJsDepth": 0
   },

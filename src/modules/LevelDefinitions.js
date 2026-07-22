@@ -61,13 +61,14 @@ export const LEVELS = [
     },
     {
         id: 5,
-        name: 'Amber Trial',
+        name: 'The Convergence',
         lanes: 7,
         colorCount: 5,
-        crystalHeight: { min: 35, max: 75 },
+        crystalHeight: { min: 40, max: 70 },
         growth: { baseMultiplier: 1.25, scoreDivisor: 450 },
         objective: { type: OBJECTIVE_TYPES.SCORE, target: 800 },
-        description: 'Score 800 points',
+        description: 'Defeat The Convergence',
+        bossId: 'convergence',
     },
 ];
 

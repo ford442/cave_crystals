@@ -67,7 +67,39 @@ export class GameLoop {
         game.progression.tick(dt, timeScale);
         game.powerUps.update(dt);
 
-        if (!game.progression.transitioning && !game.progression.isEndless()) {
+        const bossActive = game.boss.isBusy();
+        if (bossActive) {
+            const bossResult = game.boss.update(dt, timeScale);
+            if (bossResult.justSurged) {
+                SoundManager.bossSting();
+                game.createShockwave(
+                    game.renderer.width / 2,
+                    game.renderer.height / 2,
+                    game.boss.definition?.colors?.telegraph || '#FF8800'
+                );
+                game.state.shake = Math.max(game.state.shake, 22 * game.state.motionScale);
+                game.state.impactFlash = Math.max(game.state.impactFlash, 0.35 * game.state.motionScale);
+                game.state.impactFlashColor = game.boss.definition?.colors?.primary || '#FF4466';
+            }
+            if (bossResult.justEnteredVulnerable) {
+                game.createFloatingText(
+                    game.renderer.width / 2,
+                    game.renderer.height * 0.22,
+                    'VULNERABLE!',
+                    game.boss.definition?.colors?.vulnerable || '#44FFAA',
+                    2.0
+                );
+            }
+            game.state.boss = game.boss.getHudState();
+            if (bossResult.justDefeated) {
+                game.handleBossDefeat();
+                return;
+            }
+        } else {
+            game.state.boss = null;
+        }
+
+        if (!bossActive && !game.progression.transitioning && !game.progression.isEndless()) {
             if (game.progression.checkObjectiveComplete(
                 game.state.score,
                 game.state.combo,
@@ -81,43 +113,75 @@ export class GameLoop {
         let gameOver = false;
         let maxCritical = 0;
 
-        game.state.crystals.forEach(c => {
-            c.update(currentGrowth, timeScale);
+        if (bossActive) {
+            game.boss.applyGrowth(
+                game.state.crystals,
+                dt,
+                timeScale,
+                game.renderer.height,
+                game.progression.getSpawnConfig().colorCount
+            );
+            // Still run spring/flash animation with zero baseline growth
+            game.state.crystals.forEach(c => {
+                c.update(0, timeScale);
+                c.shakeX = 0;
+                c.shakeY = 0;
+                c.isCritical = false;
 
-            c.shakeX = 0;
-            c.shakeY = 0;
-            c.isCritical = false;
-
-            const laneCrystals = game.state.laneMap.get(c.lane);
-            const opposite = laneCrystals ? laneCrystals[c.type === 'top' ? 'bottom' : 'top'] : null;
-            if (opposite) {
-                const pressure = evaluateCrystalPressure(c, opposite, game.renderer.height);
-                if (pressure.isCritical) {
-                    c.isCritical = true;
-                    c.shakeX = (Math.random() - 0.5) * 4;
-                    c.shakeY = (Math.random() - 0.5) * 4;
-                    if (pressure.intensity > maxCritical) maxCritical = pressure.intensity;
-
-                    if (Math.random() < 0.1 * timeScale) {
-                        const x = (c.lane * game.renderer.laneWidth) + (game.renderer.laneWidth / 2) + c.shakeX;
-                        const tipY = c.type === 'top' ? c.height : game.renderer.height - c.height;
-                        const vx = wasmManager.getSmokeVx(Math.random());
-                        const vy = wasmManager.getSmokeVy(Math.random());
-                        game.state.particles.push(game.particlePool.acquire(x, tipY, 'rgba(100, 100, 100, 0.5)', vx, vy));
+                const laneCrystals = game.state.laneMap.get(c.lane);
+                const opposite = laneCrystals ? laneCrystals[c.type === 'top' ? 'bottom' : 'top'] : null;
+                if (opposite) {
+                    const pressure = evaluateCrystalPressure(c, opposite, game.renderer.height);
+                    if (pressure.isCritical) {
+                        c.isCritical = true;
+                        c.shakeX = (Math.random() - 0.5) * 4;
+                        c.shakeY = (Math.random() - 0.5) * 4;
+                        if (pressure.intensity > maxCritical) maxCritical = pressure.intensity;
+                    }
+                    if (pressure.gameOver) {
+                        gameOver = true;
                     }
                 }
-                if (pressure.gameOver) {
-                    gameOver = true;
-                }
-            }
+            });
+        } else {
+            game.state.crystals.forEach(c => {
+                c.update(currentGrowth, timeScale);
 
-            if (c.hasSpawned && game.renderer.getQualityProfile(game.state.renderQuality).crystalDetail !== 'low') {
-                const emitProb = c.isCritical ? 0.25 : 0.06;
-                if (Math.random() < emitProb * timeScale) {
-                    this.juice.createCrystalAura(c);
+                c.shakeX = 0;
+                c.shakeY = 0;
+                c.isCritical = false;
+
+                const laneCrystals = game.state.laneMap.get(c.lane);
+                const opposite = laneCrystals ? laneCrystals[c.type === 'top' ? 'bottom' : 'top'] : null;
+                if (opposite) {
+                    const pressure = evaluateCrystalPressure(c, opposite, game.renderer.height);
+                    if (pressure.isCritical) {
+                        c.isCritical = true;
+                        c.shakeX = (Math.random() - 0.5) * 4;
+                        c.shakeY = (Math.random() - 0.5) * 4;
+                        if (pressure.intensity > maxCritical) maxCritical = pressure.intensity;
+
+                        if (Math.random() < 0.1 * timeScale) {
+                            const x = (c.lane * game.renderer.laneWidth) + (game.renderer.laneWidth / 2) + c.shakeX;
+                            const tipY = c.type === 'top' ? c.height : game.renderer.height - c.height;
+                            const vx = wasmManager.getSmokeVx(Math.random());
+                            const vy = wasmManager.getSmokeVy(Math.random());
+                            game.state.particles.push(game.particlePool.acquire(x, tipY, 'rgba(100, 100, 100, 0.5)', vx, vy));
+                        }
+                    }
+                    if (pressure.gameOver) {
+                        gameOver = true;
+                    }
                 }
-            }
-        });
+
+                if (c.hasSpawned && game.renderer.getQualityProfile(game.state.renderQuality).crystalDetail !== 'low') {
+                    const emitProb = c.isCritical ? 0.25 : 0.06;
+                    if (Math.random() < emitProb * timeScale) {
+                        this.juice.createCrystalAura(c);
+                    }
+                }
+            });
+        }
 
         game.state.criticalIntensity += (maxCritical - game.state.criticalIntensity) * 0.1;
 
@@ -444,6 +508,27 @@ export class GameLoop {
 
     _updateObjectiveHud() {
         const game = this.game;
+        if (game.boss.isBusy() && game.state.boss) {
+            const boss = game.state.boss;
+            if (game.ui.levelName) {
+                game.ui.levelName.textContent = boss.name ? `— ${boss.name}` : '';
+            }
+            if (game.ui.objectiveLabel) {
+                const nextLabel = `Boss HP (${boss.hp}/${boss.maxHp})`;
+                if (game.ui.objectiveLabel.textContent !== nextLabel) {
+                    game.ui.objectiveLabel.textContent = nextLabel;
+                }
+            }
+            if (game.ui.objectiveProgress) {
+                const pct = boss.maxHp > 0 ? boss.hp / boss.maxHp : 0;
+                const width = `${Math.round(pct * 100)}%`;
+                if (game.ui.objectiveProgress.style.width !== width) {
+                    game.ui.objectiveProgress.style.width = width;
+                }
+            }
+            return;
+        }
+
         const progress = game.progression.getObjectiveProgress(
             game.state.score,
             game.state.combo,
