@@ -64,7 +64,7 @@
  * @property {number} sporeCount
  * @property {number} particleDrawMs
  * @property {number} particleUpdateMs
- * @property {'worker' | 'main' | 'idle'} [particleIntegratorPath]
+ * @property {'webgpu' | 'worker' | 'main' | 'idle'} [particleIntegratorPath]
  * @property {number} [particleWorkerMs]
  * @property {number} [particleWorkerBacklog]
  */
@@ -89,6 +89,9 @@
  * @property {number} scanlineBase
  * @property {'high' | 'medium' | 'low'} caveDetail
  * @property {number} maxEnvParticles
+ * @property {number} [webgpuMaxDust]
+ * @property {number} [webgpuMaxParticles]
+ * @property {number} [webgpuMaxEnvParticles]
  */
 
 /**

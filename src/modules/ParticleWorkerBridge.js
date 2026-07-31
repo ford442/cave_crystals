@@ -21,8 +21,9 @@ import {
     applyAmbientRotation,
     WORKER_MIN_PARTICLES,
 } from './particleBatchCodec.js';
+import { WebGpuParticleIntegrator } from './WebGpuParticleIntegrator.js';
 
-/** @typedef {'worker' | 'main' | 'idle'} IntegratorPath */
+/** @typedef {'webgpu' | 'worker' | 'main' | 'idle'} IntegratorPath */
 
 /**
  * @typedef {Object} ParticleWorkerStatus
@@ -31,6 +32,7 @@ import {
  * @property {number} backlog
  * @property {boolean} enabled
  * @property {boolean} ready
+ * @property {boolean} webgpuReady
  */
 
 /**
@@ -66,6 +68,7 @@ import {
 
 export class ParticleWorkerBridge {
     constructor() {
+        this.webGpu = new WebGpuParticleIntegrator();
         /** @type {Worker | null} */
         this.worker = null;
         this.ready = false;
@@ -102,14 +105,11 @@ export class ParticleWorkerBridge {
     }
 
     async init() {
-        if (this.isExplicitlyDisabled()) {
+        const webGpuReady = await this.webGpu.init();
+        if (this.isExplicitlyDisabled() || typeof Worker === 'undefined') {
             this.enabled = false;
-            return false;
-        }
-
-        if (typeof Worker === 'undefined') {
-            this.enabled = false;
-            return false;
+            this.ready = false;
+            return webGpuReady;
         }
 
         try {
@@ -124,11 +124,11 @@ export class ParticleWorkerBridge {
             };
             this.ready = true;
             this.enabled = true;
-            return true;
+            return webGpuReady || true;
         } catch {
             this.enabled = false;
             this.ready = false;
-            return false;
+            return webGpuReady;
         }
     }
 
@@ -136,18 +136,22 @@ export class ParticleWorkerBridge {
      * @returns {ParticleWorkerStatus}
      */
     getStatus() {
+        const path = this.lastPath;
+        const workerMs = path === 'webgpu' ? this.webGpu.lastGpuMs : this.lastWorkerMs;
+        const backlog = path === 'webgpu' ? this.webGpu.backlog : this.backlog;
         return {
-            path: this.lastPath,
-            workerMs: this.lastWorkerMs,
-            backlog: this.backlog,
+            path,
+            workerMs,
+            backlog,
             enabled: this.enabled,
             ready: this.ready,
+            webgpuReady: this.webGpu.ready,
         };
     }
 
     /**
      * @param {VisualIntegrationParams} params
-     * @returns {{ usedWorker: boolean, appliedResult: boolean }}
+     * @returns {{ deferred: boolean, appliedResult: boolean }}
      */
     scheduleVisualIntegration(params) {
         const {
@@ -163,12 +167,34 @@ export class ParticleWorkerBridge {
             wasmManager,
         } = params;
 
-        const hadReady = this._readyApply !== null;
+        const hadWorkerReady = this._readyApply !== null;
         this._applyReadyResult();
+        const hadWebGpuReady = this.webGpu.applyReadyResult();
+        const hadReady = hadWorkerReady || hadWebGpuReady;
 
         const dustCount = dustParticles.length;
         const totalVisual = trailCount + dustCount + ambientCount;
+        const canUseWebGpu = this.webGpu.canUse(totalVisual, renderQuality);
         const canUseWorker = this._canUseWorker(totalVisual, renderQuality);
+
+        if (canUseWebGpu) {
+            const dispatched = this.webGpu.dispatch({
+                trailBatch,
+                trailCount,
+                ambientBatch,
+                ambientCount,
+                timeScale,
+                rw,
+                rh,
+            });
+            if (dispatched) {
+                this._integrateDustOnMainThread(dustParticles, rw, rh, timeScale);
+                this.lastPath = 'webgpu';
+                this.lastWorkerMs = this.webGpu.lastGpuMs;
+                this.backlog = this.webGpu.backlog;
+                return { deferred: true, appliedResult: hadReady };
+            }
+        }
 
         if (canUseWorker) {
             const posted = this._postToWorker({
@@ -184,7 +210,7 @@ export class ParticleWorkerBridge {
             });
             if (posted) {
                 this.lastPath = 'worker';
-                return { usedWorker: true, appliedResult: hadReady };
+                return { deferred: true, appliedResult: hadReady };
             }
         }
 
@@ -200,7 +226,7 @@ export class ParticleWorkerBridge {
             wasmManager,
         });
         this.lastPath = 'main';
-        return { usedWorker: false, appliedResult: hadReady };
+        return { deferred: false, appliedResult: hadReady };
     }
 
     /**
@@ -208,6 +234,7 @@ export class ParticleWorkerBridge {
      */
     flush() {
         this._applyReadyResult();
+        this.webGpu.applyReadyResult();
     }
 
     /**
@@ -396,9 +423,7 @@ export class ParticleWorkerBridge {
             }
         }
 
-        for (let i = 0; i < dustParticles.length; i++) {
-            dustParticles[i].update(rw, rh, timeScale);
-        }
+        this._integrateDustOnMainThread(dustParticles, rw, rh, timeScale);
 
         if (ambientCount > 0) {
             const usedWasm = wasmManager.batchIntegrateAmbientParticles(
@@ -409,6 +434,18 @@ export class ParticleWorkerBridge {
                     ambientBatch[j].updateAmbient(rw, rh, timeScale);
                 }
             }
+        }
+    }
+
+    /**
+     * @param {import('./Entities.js').DustParticle[]} dustParticles
+     * @param {number} rw
+     * @param {number} rh
+     * @param {number} timeScale
+     */
+    _integrateDustOnMainThread(dustParticles, rw, rh, timeScale) {
+        for (let i = 0; i < dustParticles.length; i++) {
+            dustParticles[i].update(rw, rh, timeScale);
         }
     }
 }

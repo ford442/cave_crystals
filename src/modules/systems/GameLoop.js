@@ -314,7 +314,7 @@ export class GameLoop {
             wasmManager,
         });
 
-        if (!integration.usedWorker || integration.appliedResult) {
+        if (!integration.deferred || integration.appliedResult) {
             for (let i = particles.length - 1; i >= 0; i--) {
                 if (particles[i].isTrail && particles[i].life <= 0) {
                     removeParticleAt(i);
@@ -322,7 +322,7 @@ export class GameLoop {
             }
         }
 
-        if (!integration.usedWorker || integration.appliedResult) {
+        if (!integration.deferred || integration.appliedResult) {
             for (let i = particles.length - 1; i >= 0; i--) {
                 const raw = particles[i];
                 if (raw.isTrail) continue;

@@ -8,6 +8,7 @@ import { CaveRenderer } from './renderers/CaveRenderer.js';
 import { PostEffectsRenderer } from './renderers/PostEffectsRenderer.js';
 import { HudEffectsRenderer } from './renderers/HudEffectsRenderer.js';
 import { ParticleRenderer } from './renderers/ParticleRenderer.js';
+import { particleWorkerBridge } from './ParticleWorkerBridge.js';
 
 export class Renderer {
     /**
@@ -77,7 +78,17 @@ export class Renderer {
      * @returns {RenderQualityProfile}
      */
     getQualityProfile(quality = 'high') {
-        return this.host.getQualityProfile(quality);
+        const profile = this.host.getQualityProfile(quality);
+        const status = particleWorkerBridge.getStatus();
+        if (quality === 'high' && status.webgpuReady) {
+            return {
+                ...profile,
+                maxDust: profile.webgpuMaxDust ?? profile.maxDust,
+                maxParticles: profile.webgpuMaxParticles ?? profile.maxParticles,
+                maxEnvParticles: profile.webgpuMaxEnvParticles ?? profile.maxEnvParticles,
+            };
+        }
+        return profile;
     }
 
     /**
@@ -87,7 +98,7 @@ export class Renderer {
      */
     draw(gameState, launcher, timestamp = performance.now()) {
         const { host, crystal, cave, post, hud, particles } = this;
-        const profile = host.getQualityProfile(gameState.renderQuality);
+        const profile = this.getQualityProfile(gameState.renderQuality);
         post.syncBackend(profile, gameState);
         if (!host.ctx) return;
         const motionScale = gameState.motionScale ?? 1;
