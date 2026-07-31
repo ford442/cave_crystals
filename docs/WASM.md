@@ -2,6 +2,8 @@
 
 Crystal Cave loads WASM through ASC-generated ESM bindings in `build/release.js` (imported lazily via `src/modules/wasmBridge.js` and wrapped by `WasmManager`). AssemblyScript sources live in `src/assembly/`.
 
+For particle-threading / WebGPU integrator details, see [`PARTICLES.md`](./PARTICLES.md).
+
 ## What belongs in WASM
 
 | Category | Examples | Rationale |

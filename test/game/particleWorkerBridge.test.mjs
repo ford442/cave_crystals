@@ -45,7 +45,7 @@ describe('ParticleWorkerBridge', () => {
             wasmManager,
         });
 
-        assert.equal(result.usedWorker, false);
+        assert.equal(result.deferred, false);
         assert.equal(bridge.getStatus().path, 'main');
         assert.ok(trail.x > 0 || mainTrailCalled);
     });
@@ -77,5 +77,12 @@ describe('ParticleWorkerBridge', () => {
                 delete globalThis.__PARTICLE_WORKER__;
             }
         }
+    });
+
+    it('reports webgpu readiness in status', () => {
+        const bridge = new ParticleWorkerBridge();
+        bridge.webGpu.ready = true;
+        const status = bridge.getStatus();
+        assert.equal(status.webgpuReady, true);
     });
 });

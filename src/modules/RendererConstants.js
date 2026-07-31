@@ -83,7 +83,8 @@ const RENDER_QUALITY_PROFILES = {
         maxDust: 140, maxParticles: 1400, particleStride: 1, gridBase: 50,
         crystalDetail: 'high', postFX: true, lightShafts: true, shaftDust: true, fog: true, allowGridDistortion: true,
         bloom: true, bloomStrength: 0.85, grainAmount: 1.0, grainHighQuality: true, colorGrade: true, scanlineBase: 0.08,
-        caveDetail: 'high', maxEnvParticles: 80
+        caveDetail: 'high', maxEnvParticles: 80,
+        webgpuMaxDust: 220, webgpuMaxParticles: 2200, webgpuMaxEnvParticles: 120
     },
     medium: {
         maxDust: 95, maxParticles: 800, particleStride: 1, gridBase: 65,
