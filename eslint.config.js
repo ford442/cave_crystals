@@ -41,7 +41,7 @@ export const browserModuleLint = {
             'error',
             {
                 commonjs: true,
-                ignore: ['\\?worker$', '\\?url$'],
+                ignore: ['\\?worker$', '\\?url$', 'build/release\\.js$'],
             },
         ],
         'import/named': 'error',

@@ -180,7 +180,7 @@ export class TutorialManager {
             if (this._comboHintShown) {
                 const scoreBoard = document.getElementById('scoreBoard');
                 if (scoreBoard) {
-                    rings.push(this._elementRect(scoreBoard, canvasRect));
+                    rings.push(this._elementRect(scoreBoard));
                 }
             }
         }
@@ -357,9 +357,8 @@ export class TutorialManager {
 
     /**
      * @param {HTMLElement} element
-     * @param {DOMRect} canvasRect
      */
-    _elementRect(element, canvasRect) {
+    _elementRect(element) {
         const rect = element.getBoundingClientRect();
         const el = document.createElement('div');
         el.className = 'tutorial-focus-ring tutorial-focus-ring--hud';

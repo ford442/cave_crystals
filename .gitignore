@@ -1,7 +1,8 @@
 node_modules/
 dist/
 .DS_Store
-build/
+build/*
+!build/release.d.ts
 *.wasm
 *.wat
 __pycache__/
