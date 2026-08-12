@@ -4,7 +4,6 @@
  * Loads ASC-generated bindings via wasmBridge and exposes {@link WasmManagerApi} with JS fallbacks.
  *
  * @import { CollisionResult, Crystal, Spore, WasmManagerApi } from './types.js'
- * @import { loadWasmBindings } from './wasmBridge.js'
  */
 
 import {

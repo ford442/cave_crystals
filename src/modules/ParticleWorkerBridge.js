@@ -46,7 +46,7 @@ import { WebGpuParticleIntegrator } from './WebGpuParticleIntegrator.js';
  * @property {number} rw
  * @property {number} rh
  * @property {string} renderQuality
- * @property {import('./WasmManager.js').WasmManager} wasmManager
+ * @property {import('./types.js').WasmManagerApi} wasmManager
  */
 
 /**

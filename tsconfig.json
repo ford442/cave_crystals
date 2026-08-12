@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "maxNodeModuleJsDepth": 0
   },
-  "include": ["src/**/*.js", "src/global.d.ts"],
+  "include": ["src/**/*.js", "src/global.d.ts", "build/release.d.ts"],
   "exclude": ["src/assembly/**"]
 }

@@ -43,13 +43,14 @@ export const GRAIN_BUFFER_CONTEXT = /** @type {const} */ ({
  * @returns {CreateCanvas2DResult}
  */
 export function createCanvas2DContext(canvas, options, { retryWithoutDesync = false } = {}) {
+    /** @type {CanvasRenderingContext2D | null} */
     let ctx = canvas.getContext('2d', options);
     let desynchronizedActive;
 
     if (!ctx && retryWithoutDesync && options.desynchronized) {
         const { desynchronized, ...rest } = options;
         void desynchronized;
-        ctx = canvas.getContext('2d', rest);
+        ctx = /** @type {CanvasRenderingContext2D | null} */ (canvas.getContext('2d', rest));
         desynchronizedActive = false;
     } else if (ctx && typeof ctx.getContextAttributes === 'function') {
         desynchronizedActive = ctx.getContextAttributes().desynchronized === true;

@@ -587,6 +587,11 @@
  */
 
 /**
+ * Alias for the raw ASC-generated bindings surface loaded via `wasmBridge.js`.
+ * @typedef {WasmExports} WasmBindings
+ */
+
+/**
  * Public WASM wrapper surface — each method falls back to JavaScript when WASM is unavailable.
  * @typedef {Object} WasmManagerApi
  * @property {() => Promise<boolean>} init

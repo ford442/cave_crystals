@@ -110,5 +110,6 @@ self.onmessage = async (event) => {
         response.ambient = { buffer: ambient.buffer, count: ambient.count };
     }
 
-    self.postMessage(response, transfer);
+    /** @type {(message: unknown, transfer: Transferable[]) => void} */
+    (self.postMessage)(response, transfer);
 };

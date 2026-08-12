@@ -398,7 +398,7 @@ export class PostEffectsRenderer {
    * @param {RenderQualityProfile} [profile]
    * @param {CanvasRenderingContext2D | null | undefined} [targetCtx]
    */
-    drawLightShafts(gameState, launcher, timestamp = 0, profile = {}, targetCtx) {
+    drawLightShafts(gameState, launcher, timestamp = 0, profile = /** @type {RenderQualityProfile} */ ({}), targetCtx) {
         const ctx = this._resolveCtx(targetCtx);
         if (!ctx) return;
 

@@ -8,6 +8,17 @@ declare module '*.wasm' {
     export default src;
 }
 
+declare module '*?worker' {
+    const WorkerFactory: new () => Worker;
+    export default WorkerFactory;
+}
+
+declare module '*?url' {
+    const src: string;
+    export default src;
+}
+
+
 interface ImportMeta {
     readonly env?: {
         readonly DEV?: boolean;
@@ -28,6 +39,13 @@ interface Document {
 interface HTMLElement {
     webkitRequestFullscreen?: () => Promise<void>;
     mozRequestFullScreen?: () => Promise<void>;
+}
+
+interface Navigator {
+    /** WebGPU is not in the configured DOM lib; type loosely rather than pull in @webgpu/types. */
+    gpu?: {
+        requestAdapter: (options?: unknown) => Promise<{ requestDevice: (options?: unknown) => Promise<any> } | null>;
+    };
 }
 
 interface Window {
