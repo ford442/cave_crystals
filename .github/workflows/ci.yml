@@ -72,6 +72,41 @@ jobs:
             verification/*.png
           retention-days: 7
 
+  postfx-context:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('verification/requirements.txt') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright
+        run: |
+          pip install -r verification/requirements.txt
+          python3 -m playwright install chromium --with-deps
+
+      - name: Canvas2D context attribute smoke
+        run: python3 verification/verify_canvas_context.py
+
+      - name: WebGL/Canvas2D post-FX backend assertions
+        run: python3 verification/verify_webgl_postfx.py
+
   visual:
     needs: build
     continue-on-error: true

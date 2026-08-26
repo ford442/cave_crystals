@@ -168,11 +168,17 @@ Two GitHub Actions workflows run on every push to `main` and on pull requests (n
 | Workflow | What it gates |
 |----------|---------------|
 | [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), WASM unit tests (`test:unit`) |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test (`verify_juice.py`) + non-blocking visual regression (`run_visual.py`) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test (`verify_juice.py`) + blocking post-FX/context assertions (`verify_canvas_context.py`, `verify_webgl_postfx.py`) + non-blocking visual regression (`run_visual.py`) |
 
 The smoke job downloads the `dist/` artifact from the build job — it does not run `npm ci`. CI uses `verify_juice.py` (wired as `npm run verify:smoke`) because it asserts audio, save, keyboard, gameplay, and zero page errors.
 
-The **visual** job (also in `ci.yml`, `continue-on-error: true` for now) runs `python3 verification/run_visual.py`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
+The **postfx-context** job (`ci.yml`, blocking) runs two scripts that assert rather than pixel-diff, so they don't inherit the flakiness described below:
+- `verify_canvas_context.py` (`npm run verify:canvas-context`) — asserts explicit Canvas2D context attributes (`alpha`, `willReadFrequently`, `desynchronized`) on the main/bloom/grain buffers and sanity-checks a sampled `smoothedFrameMs`. No screenshot, no GPU required.
+- `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'` (always exercised), then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot **only** when a real WebGL2 context is available. Because `CHROMIUM_ARGS` includes `--disable-gpu` (needed for headless container reliability), CI never actually has a WebGL2 context, so the WebGL branch always takes the `[skip]` path — the Canvas2D fallback assertion is what's actually enforced today. This script is intentionally **not** in `visual_manifest.py`: there is no way to capture a stable WebGL baseline without GPU in CI, so gating on backend correctness (which always runs) is the honest contract instead of a pixel diff that would only ever run locally on GPU-capable machines.
+
+The **visual** job (also in `ci.yml`, `continue-on-error: true`) runs `python3 verification/run_visual.py`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
+
+**Known limitation — do not flip `continue-on-error` to `false` without fixing this first:** the six canonical scripts only freeze rendering (`screenshot_utils.freeze_visual_loop`) for the final capture. Everything before that — mouse clicks, `advance(page, ms)` — runs the *live* game loop across however many real `requestAnimationFrame` ticks happen to land in that wall-clock window. On a resource-contended sandbox this is measured to produce **17–99% pixel divergence between two consecutive runs of the same script against the same `dist/`, with zero code changes** (e.g. `verify_renderer_composition.py` run twice back-to-back: 78.75% different). Seeding `Math.random` does not fix this because the *number* of ticks (and therefore RNG draws) varies with real frame timing, not just their values. Until the pre-capture interaction sequence is driven deterministically (fixed-step `game.loop(ts)` calls instead of real-time `advance()`, or CDP virtual time), flipping this job to blocking will make it fail PRs at random. Treat baseline refreshes with the same caution: don't run `update_baselines.py` from a loaded/shared machine and commit the result — verify run-to-run stability first (e.g. run the target script twice and diff the two outputs against each other, not just against the baseline).
 
 Reproduce CI locally:
 
@@ -182,6 +188,8 @@ npm run lint && npm run typecheck && npm run test:lint && npm run test:unit   # 
 npm run build                                                                  # ci.yml build job
 pip install -r verification/requirements.txt && python3 -m playwright install chromium --with-deps
 python3 verification/verify_juice.py                                           # ci.yml smoke job
+python3 verification/verify_canvas_context.py                                  # ci.yml postfx-context job
+python3 verification/verify_webgl_postfx.py                                    # ci.yml postfx-context job
 python3 verification/run_visual.py                                               # ci.yml visual job (non-blocking)
 # or: npm run verify   # build + verify_juice.py
 ```
@@ -206,7 +214,7 @@ Helpers:
 - [`verification/run_visual.py`](verification/run_visual.py) — canonical runner + baseline gate (backs `npm run verify:visual`)
 - [`verification/update_baselines.py`](verification/update_baselines.py) — refresh committed PNGs (backs `npm run verify:visual:update`)
 
-`verify_critical_vignette.py`, `verify_settings.py`, and the `game_spore_http` frame capture screenshots but are not gated yet — their scenes are still too variable for stable pixel diff. `npm run verify:visual:all` runs the full `run_all.py` battery without baseline comparison.
+`verify_critical_vignette.py`, `verify_settings.py`, and the `game_spore_http` frame capture screenshots but are not gated yet — their scenes are still too variable for stable pixel diff (see the real-time `advance()` limitation above; revisit once the canonical scripts get deterministic frame-stepping). `verify_webgl_postfx.py` captures a screenshot only when a real GPU is present and is gated on its backend assertions instead (see above), not a pixel baseline. `npm run verify:visual:all` runs the full `run_all.py` battery without baseline comparison.
 
 ### Replay recording and playback
 
@@ -252,6 +260,8 @@ Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Pla
 npm run build          # or: npm run verify:build
 npm run verify          # build + one fast Playwright smoke test (verify_juice.py)
 npm run verify:smoke    # just the smoke test, assumes dist/ already built
+npm run verify:canvas-context # Canvas2D context attribute + frame-pacing assertions, no GPU/screenshot needed
+npm run verify:webgl-postfx   # WebGL2/Canvas2D post-FX backend assertions (screenshot only if GPU present)
 npm run verify:visual         # canonical scripts + baseline pixel-diff gate
 npm run verify:visual:update  # refresh verification/baselines/ after intentional art changes
 npm run verify:visual:all     # run every verification/verify_*.py script, print a summary
@@ -346,7 +356,7 @@ At **`renderQuality === 'high'`** with bloom enabled, the game auto-selects a **
 
 FBOs are rebuilt on resize; WebGL is only acquired on the display canvas while the high-quality backend is active.
 
-**Verification:** `python3 verification/verify_webgl_postfx.py` (programmatic backend assertions + optional screenshot). Not yet in the gated visual manifest — threshold bloom differs from legacy entity-blob baselines.
+**Verification:** `python3 verification/verify_webgl_postfx.py` (programmatic backend assertions + optional screenshot), wired as a blocking CI step (`postfx-context` job in `ci.yml`). Not in the pixel-diff visual manifest — CI runs headless with `--disable-gpu`, so the WebGL2 branch (and its threshold-bloom screenshot) never actually executes there; the Canvas2D fallback assertion is the part that's really gated. See "Continuous integration" above.
 
 **Key files:** `src/modules/renderers/postfx/PostFxUniforms.js`, `Canvas2DPostFxBackend.js`, `WebGL2PostFxBackend.js`, `src/modules/renderers/webgl/glUtils.js`, `src/modules/renderers/webgl/shaders.js`.
 
@@ -370,7 +380,7 @@ All canvas contexts are created in `src/modules/renderers/RendererHost.js` via p
 3. Play actively for ~30s and compare `smoothedFrameMs` in the overlay.
 4. Optional: Chrome DevTools → Performance with 4× CPU throttle + mobile device emulation.
 
-**Automated check:** `python3 verification/verify_canvas_context.py` asserts context attributes and logs a short frame-time sample (sanity guard, not a benchmark).
+**Automated check:** `python3 verification/verify_canvas_context.py` asserts context attributes and logs a short frame-time sample (sanity guard, not a benchmark). Wired as a blocking CI step (`postfx-context` job in `ci.yml`) — no GPU or screenshot required, so it's cheap and stable enough to gate on directly.
 
 ### Entity types
 - `Crystal` — top/bottom lane crystals with elastic scale animation, flash, critical state, and seeded shard configurations.
