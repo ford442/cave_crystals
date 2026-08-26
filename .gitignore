@@ -10,3 +10,8 @@ __pycache__/
 .env.*
 !.env.example
 deploy.local.json
+
+# Ad-hoc debug output from local `npm run dev` / verification runs.
+# Canonical verification screenshots belong under verification/, not repo root.
+/*.log
+/*.png
