@@ -156,5 +156,6 @@ export class SettingsManager {
             const acc = this.saveManager.getAccuracy();
             ui.accuracyVal.textContent = `${Math.round(acc * 100)}%`;
         }
+        this._game.systems?.achievements?.renderPanel();
     }
 }

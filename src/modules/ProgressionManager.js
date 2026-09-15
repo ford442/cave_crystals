@@ -18,6 +18,8 @@ export class ProgressionManager {
         this.elapsedMs = 0;
         /** @type {number} */
         this.bestStreak = 0;
+        /** @type {number} Mismatches recorded since the current level began (for the "perfect level" achievement). */
+        this.levelMismatches = 0;
         /** @type {boolean} */
         this.transitioning = false;
         /** @type {number} */
@@ -43,6 +45,7 @@ export class ProgressionManager {
         this.scoreAtLevelStart = 0;
         this.elapsedMs = 0;
         this.bestStreak = 0;
+        this.levelMismatches = 0;
         this.transitioning = false;
         this.transitionTimer = 0;
         this.campaignComplete = false;
@@ -91,6 +94,7 @@ export class ProgressionManager {
         this.scoreAtLevelStart = score;
         this.elapsedMs = 0;
         this.bestStreak = 0;
+        this.levelMismatches = 0;
         this.transitioning = false;
         this.transitionTimer = 0;
     }
@@ -118,10 +122,13 @@ export class ProgressionManager {
         if (this.transitioning) return;
         if (isMatch) {
             this.bestStreak = Math.max(this.bestStreak, combo);
-        } else if (!this.isEndless()) {
-            const cfg = this.getActiveConfig();
-            if (cfg.objective?.type === OBJECTIVE_TYPES.STREAK) {
-                this.bestStreak = 0;
+        } else {
+            this.levelMismatches += 1;
+            if (!this.isEndless()) {
+                const cfg = this.getActiveConfig();
+                if (cfg.objective?.type === OBJECTIVE_TYPES.STREAK) {
+                    this.bestStreak = 0;
+                }
             }
         }
     }

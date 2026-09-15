@@ -4,6 +4,7 @@ import { QualitySystem } from './QualitySystem.js';
 import { JuiceSystem } from './JuiceSystem.js';
 import { CollisionSystem } from './CollisionSystem.js';
 import { ComboSystem } from './ComboSystem.js';
+import { AchievementSystem } from './AchievementSystem.js';
 import { GameLoop } from './GameLoop.js';
 
 /**
@@ -16,8 +17,9 @@ export function registerSystems(game) {
     const juice = new JuiceSystem(game, quality);
     const collision = new CollisionSystem();
     const combo = new ComboSystem(game, juice);
+    const achievements = new AchievementSystem(game);
     const loop = new GameLoop(game, { quality, juice, collision, combo });
 
-    game.systems = { quality, juice, collision, combo, loop };
+    game.systems = { quality, juice, collision, combo, achievements, loop };
     return game.systems;
 }

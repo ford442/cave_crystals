@@ -58,6 +58,7 @@ export class ComboSystem {
 
             const combo = applyMatchCombo(state, { motionScale: m });
             game._sessionBestCombo = Math.max(game._sessionBestCombo || 0, combo);
+            game.systems.achievements.onMatch(combo);
 
             SoundManager.match(computeMatchPitch(combo));
 

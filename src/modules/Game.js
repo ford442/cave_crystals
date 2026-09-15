@@ -77,6 +77,13 @@ export class Game {
             highScoreVal: document.getElementById('highScoreVal'),
             bestComboVal: document.getElementById('bestComboVal'),
             accuracyVal: document.getElementById('accuracyVal'),
+            totalGamesVal: document.getElementById('totalGamesVal'),
+            totalShotsVal: document.getElementById('totalShotsVal'),
+            bossesDefeatedVal: document.getElementById('bossesDefeatedVal'),
+            timePlayedVal: document.getElementById('timePlayedVal'),
+            achievementsUnlockedCount: document.getElementById('achievementsUnlockedCount'),
+            achievementsTotalCount: document.getElementById('achievementsTotalCount'),
+            achievementsList: document.getElementById('achievementsList'),
         };
 
         this.save = new SaveManager();
@@ -370,6 +377,7 @@ export class Game {
 
         this.save.recordGameStart();
         this._sessionBestCombo = 0;
+        this.systems.achievements.resetSession();
         this.progression.reset();
         this.progression.setMode(config.gameMode);
         if (config.levelIndex > 0) {
@@ -521,6 +529,8 @@ export class Game {
         const color = def?.colors?.secondary || '#FFD700';
 
         SoundManager.bossDefeat();
+        this.save.recordBossDefeat();
+        this.systems.achievements.onBossDefeat(def?.id);
         this.state.score += rewards.scoreBonus || 0;
         const rainbows = rewards.rainbowCount || 0;
         for (let i = 0; i < rainbows; i++) {
@@ -846,6 +856,10 @@ export class Game {
 
     handleLevelComplete() {
         if (this.progression.transitioning) return;
+        this.systems.achievements.onLevelComplete({
+            endless: this.progression.isEndless(),
+            mismatches: this.progression.levelMismatches,
+        });
         this.progression.startTransition(2500);
         this.triggerLevelUp();
 
@@ -864,6 +878,7 @@ export class Game {
             this.save.recordGameEnd({
                 score: this.state.score,
                 combo: this._sessionBestCombo || 0,
+                playTimeMs: this.state.gameClockMs,
             });
             this.showGameOverStats();
             if (this.ui.gameOverTitle) {
