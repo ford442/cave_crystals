@@ -67,6 +67,10 @@ export class GameLoop {
         game.progression.tick(dt, timeScale);
         game.powerUps.update(dt);
 
+        if (game.progression.isEndless()) {
+            game.systems.achievements.onSurvivalTick(game.state.gameClockMs);
+        }
+
         const bossActive = game.boss.isBusy();
         if (bossActive) {
             const bossResult = game.boss.update(dt, timeScale);
@@ -201,6 +205,7 @@ export class GameLoop {
             game.save.recordGameEnd({
                 score: game.state.score,
                 combo: game._sessionBestCombo || 0,
+                playTimeMs: game.state.gameClockMs,
             });
 
             setTimeout(() => {
@@ -504,6 +509,7 @@ export class GameLoop {
         }
 
         game.tutorial?.update(dt);
+        game.systems.achievements.update(dt);
     }
 
     _updateObjectiveHud() {

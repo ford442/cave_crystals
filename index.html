@@ -181,6 +181,21 @@
                 <p>High Score: <span id="highScoreVal">0</span></p>
                 <p>Best Combo: <span id="bestComboVal">0</span></p>
                 <p>Accuracy: <span id="accuracyVal">0%</span></p>
+                <div class="settings-panel">
+                    <div class="settings-section">
+                        <div class="settings-heading">Lifetime Stats</div>
+                        <div class="settings-row">Games Played: <span id="totalGamesVal">0</span></div>
+                        <div class="settings-row">Shots Fired: <span id="totalShotsVal">0</span></div>
+                        <div class="settings-row">Bosses Defeated: <span id="bossesDefeatedVal">0</span></div>
+                        <div class="settings-row">Time Played: <span id="timePlayedVal">0s</span></div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-heading">
+                            Achievements (<span id="achievementsUnlockedCount">0</span>/<span id="achievementsTotalCount">0</span>)
+                        </div>
+                        <div id="achievementsList" class="achievements-list"></div>
+                    </div>
+                </div>
                 <button id="restartBtn">RESTART</button>
             </div>
 
@@ -196,6 +211,8 @@
 
             <div id="fpsCounter">-- FPS</div>
         </div>
+
+        <div id="achievementToast" class="hidden" role="status" aria-live="polite"></div>
 
         <div id="tutorialLayer" class="hidden" aria-live="polite">
             <div id="tutorialSpotlights"></div>

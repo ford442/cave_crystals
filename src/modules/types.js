@@ -741,6 +741,13 @@
  * @property {HTMLElement | null} highScoreVal
  * @property {HTMLElement | null} bestComboVal
  * @property {HTMLElement | null} accuracyVal
+ * @property {HTMLElement | null} totalGamesVal
+ * @property {HTMLElement | null} totalShotsVal
+ * @property {HTMLElement | null} bossesDefeatedVal
+ * @property {HTMLElement | null} timePlayedVal
+ * @property {HTMLElement | null} achievementsUnlockedCount
+ * @property {HTMLElement | null} achievementsTotalCount
+ * @property {HTMLElement | null} achievementsList
  */
 
 export {};

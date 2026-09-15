@@ -32,7 +32,9 @@ export const LEGACY_AUDIO_KEY = 'cave-crystals-audio';
  * @property {number} totalShots
  * @property {number} totalMatches
  * @property {number} totalMismatches
- * @property {Record<string, number>} achievements
+ * @property {number} bossesDefeated
+ * @property {number} timePlayedMs
+ * @property {Record<string, number>} achievements Achievement id -> unlock timestamp (epoch ms).
  */
 
 /**
@@ -62,8 +64,13 @@ export const DEFAULT_STATS = {
     totalShots: 0,
     totalMatches: 0,
     totalMismatches: 0,
+    bossesDefeated: 0,
+    timePlayedMs: 0,
     achievements: {},
 };
+
+/** Bump when SaveData's shape changes in a way `normalizeSave` can't transparently absorb. */
+export const SAVE_VERSION = 2;
 
 const QUALITY_MODES = new Set(['auto', 'low', 'medium', 'high', 'dev']);
 const GAME_MODES = new Set(['campaign', 'endless']);
@@ -103,6 +110,8 @@ export function normalizeStats(raw = {}) {
         totalShots: Math.max(0, Number(raw.totalShots) || 0),
         totalMatches: Math.max(0, Number(raw.totalMatches) || 0),
         totalMismatches: Math.max(0, Number(raw.totalMismatches) || 0),
+        bossesDefeated: Math.max(0, Number(raw.bossesDefeated) || 0),
+        timePlayedMs: Math.max(0, Number(raw.timePlayedMs) || 0),
         achievements: raw.achievements && typeof raw.achievements === 'object' ? { ...raw.achievements } : {},
     };
 }
@@ -113,7 +122,7 @@ export function normalizeStats(raw = {}) {
  */
 export function normalizeSave(raw = {}) {
     return {
-        version: 1,
+        version: SAVE_VERSION,
         settings: normalizeSettings(raw.settings),
         stats: normalizeStats(raw.stats),
     };
@@ -141,6 +150,11 @@ function loadLegacyAudio() {
 }
 
 /**
+ * Applies cross-version fixups to an already-normalized save. `normalizeSave` (via
+ * `normalizeStats`/`normalizeSettings`) already fills in defaults for fields a save
+ * predates — e.g. a v1 blob with no `bossesDefeated`/`achievements` loads safely as v2 —
+ * so this only needs to handle migrations normalization can't express, like pulling
+ * settings out of a separate legacy storage key.
  * @param {SaveData} save
  * @returns {SaveData}
  */
@@ -247,10 +261,32 @@ export class SaveManager {
         this.save();
     }
 
+    recordBossDefeat() {
+        this.data.stats.bossesDefeated += 1;
+        this.save();
+    }
+
     /**
-     * @param {{ score: number, combo?: number }} result
+     * @param {{ score: number, combo?: number, playTimeMs?: number }} result
      */
     recordGameEnd(result) {
         this.recordRunEnd(result.score, result.combo || 0);
+        if (result.playTimeMs) {
+            this.data.stats.timePlayedMs += Math.max(0, result.playTimeMs);
+            this.save();
+        }
+    }
+
+    /**
+     * Unlocks an achievement if it isn't already unlocked, persisting the unlock timestamp.
+     * @param {string} id
+     * @param {number} [timestamp]
+     * @returns {boolean} true if this call newly unlocked it
+     */
+    unlockAchievement(id, timestamp = Date.now()) {
+        if (this.data.stats.achievements[id]) return false;
+        this.data.stats.achievements = { ...this.data.stats.achievements, [id]: timestamp };
+        this.save();
+        return true;
     }
 }
