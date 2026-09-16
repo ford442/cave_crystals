@@ -107,6 +107,9 @@ jobs:
       - name: WebGL/Canvas2D post-FX backend assertions
         run: python3 verification/verify_webgl_postfx.py
 
+      - name: Render backend fallback/recovery assertions
+        run: python3 verification/verify_backend_recovery.py
+
   visual:
     needs: build
     continue-on-error: true

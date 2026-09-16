@@ -16,6 +16,7 @@
     "verify:pwa": "python3 verification/verify_pwa_offline.py",
     "verify:canvas-context": "python3 verification/verify_canvas_context.py",
     "verify:webgl-postfx": "python3 verification/verify_webgl_postfx.py",
+    "verify:backend-recovery": "python3 verification/verify_backend_recovery.py",
     "verify:visual": "python3 verification/run_visual.py",
     "verify:visual:update": "python3 verification/update_baselines.py",
     "verify:visual:all": "python3 verification/run_all.py",

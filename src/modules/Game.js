@@ -50,8 +50,8 @@ export class Game {
         this.progression = new ProgressionManager();
         this.powerUps = new PowerUpManager();
         this.boss = new BossController();
-        this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
-        this.renderer = new Renderer(this.canvas);
+        const initialCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
+        this.renderer = new Renderer(initialCanvas);
         this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
 
         /** @type {import('./types.js').GameUiElements} */
@@ -245,6 +245,15 @@ export class Game {
     }
 
     /**
+     * The renderer may swap the underlying element when switching display backends (a
+     * canvas's context type is fixed for its lifetime), so this always reflects the live node.
+     * @returns {HTMLCanvasElement}
+     */
+    get canvas() {
+        return this.renderer.canvas;
+    }
+
+    /**
      * @param {number} value
      * @returns {number}
      */
@@ -271,7 +280,12 @@ export class Game {
         window.addEventListener('resize', () => this.resize());
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         window.addEventListener('mousedown', (e) => this.handleInput(e));
-        this.canvas.addEventListener('touchstart', (e) => this.handleTouch(e), { passive: false });
+        // Bound to the stable container (not the canvas itself): the renderer may replace the
+        // canvas element when switching display backends, which would silently drop a listener
+        // attached directly to it.
+        document.getElementById('gameContainer').addEventListener(
+            'touchstart', (e) => this.handleTouch(e), { passive: false }
+        );
         window.addEventListener('keydown', (e) => {
             if (this.state.active && !this.state.paused) {
                 const gameKeys = ['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'Enter'];

@@ -2,11 +2,13 @@ import { COLORS, GAME_CONFIG } from '../RendererConstants.js';
 import { Canvas2DPostFxBackend } from './postfx/Canvas2DPostFxBackend.js';
 import { WebGL2PostFxBackend } from './postfx/WebGL2PostFxBackend.js';
 import { buildPostFxUniforms } from './postfx/PostFxUniforms.js';
+import { resolveDisplayBackend } from './canvasContext.js';
 /** @import { RendererHost } from './RendererHost.js' */
 /** @import { GameState, Launcher, RenderQualityProfile } from '../types.js' */
 /** @import { PostFxUniforms } from './postfx/PostFxUniforms.js' */
+/** @import { DisplayBackendId } from './canvasContext.js' */
 
-/** @typedef {'webgl2' | 'canvas2d'} PostFxBackendId */
+/** @typedef {DisplayBackendId} PostFxBackendId */
 
 export class PostEffectsRenderer {
     /** @param {RendererHost} host */
@@ -15,6 +17,7 @@ export class PostEffectsRenderer {
         this._canvas2d = new Canvas2DPostFxBackend(host);
         /** @type {WebGL2PostFxBackend | null} */
         this._webgl = null;
+        this._webglGeneration = -1;
         /** @type {PostFxBackendId} */
         this._activeBackend = 'canvas2d';
     }
@@ -27,6 +30,18 @@ export class PostEffectsRenderer {
     /**
      * @param {RenderQualityProfile} profile
      * @param {GameState} gameState
+     * @returns {{ wantsWebGL: boolean, forceCanvas2D: boolean, forceWebGL2: boolean }}
+     */
+    _backendIntent(profile, gameState) {
+        const forceCanvas2D = typeof window !== 'undefined' && !!window.__FORCE_CANVAS_POSTFX__;
+        const forceWebGL2 = typeof window !== 'undefined' && !!window.__FORCE_WEBGL_POSTFX__;
+        const wantsWebGL = gameState.renderQuality === 'high' && !!profile.bloom;
+        return { wantsWebGL, forceCanvas2D, forceWebGL2 };
+    }
+
+    /**
+     * @param {RenderQualityProfile} profile
+     * @param {GameState} gameState
      * @returns {boolean}
      */
     usesWebGL(profile, gameState) {
@@ -34,19 +49,22 @@ export class PostEffectsRenderer {
     }
 
     /**
+     * Which backend should render *this frame's* content. Reflects transient WebGL context
+     * loss (falls back to Canvas2D) without implying the display canvas should be rebound —
+     * see `syncBackend()`.
      * @param {RenderQualityProfile} profile
      * @param {GameState} gameState
      * @returns {PostFxBackendId}
      */
     resolveBackend(profile, gameState) {
-        if (typeof window !== 'undefined') {
-            if (window.__FORCE_CANVAS_POSTFX__) return 'canvas2d';
-            if (window.__FORCE_WEBGL_POSTFX__) {
-                return this.host.postFxGlReady ? 'webgl2' : 'canvas2d';
-            }
-        }
-        if (gameState.renderQuality !== 'high' || !profile.bloom) return 'canvas2d';
-        return this.host.postFxGlReady ? 'webgl2' : 'canvas2d';
+        const { wantsWebGL, forceCanvas2D, forceWebGL2 } = this._backendIntent(profile, gameState);
+        return resolveDisplayBackend({
+            webgl2Supported: this.host.postFxGlReady,
+            webgl2ContextLost: this.host.webglContextLost,
+            wantsWebGL,
+            forceCanvas2D,
+            forceWebGL2,
+        });
     }
 
     /**
@@ -55,11 +73,23 @@ export class PostEffectsRenderer {
      */
     syncBackend(profile, gameState) {
         const next = this.resolveBackend(profile, gameState);
-        if (next === 'webgl2') {
+        const { wantsWebGL, forceCanvas2D, forceWebGL2 } = this._backendIntent(profile, gameState);
+        const wantsWebGLDisplay = !forceCanvas2D && (forceWebGL2 || wantsWebGL);
+
+        if (wantsWebGLDisplay) {
             this.host.ensureWebGLDisplay();
+        } else {
+            this.host.ensureCanvas2DDisplay();
+        }
+
+        if (next === 'webgl2') {
+            if (this._webgl && this._webglGeneration !== this.host.postFxGlGeneration) {
+                this._disposeWebglBackend();
+            }
             if (!this._webgl && this.host.postFxGl) {
                 try {
                     this._webgl = new WebGL2PostFxBackend(this.host.postFxGl);
+                    this._webglGeneration = this.host.postFxGlGeneration;
                 } catch (err) {
                     console.info('[PostFX] WebGL2 backend init failed; using Canvas2D.', err);
                     this.host.postFxGlReady = false;
@@ -68,10 +98,24 @@ export class PostEffectsRenderer {
                     return;
                 }
             }
-        } else {
-            this.host.ensureCanvas2DDisplay();
+        } else if (this._webgl && !wantsWebGLDisplay) {
+            this._disposeWebglBackend();
         }
         this._activeBackend = next;
+    }
+
+    _disposeWebglBackend() {
+        // Once a context has lived through a real webglcontextlost/restored cycle, this
+        // sandbox's software WebGL implementation crashes on explicit gl.delete*() calls
+        // against it once its canvas is later detached — verified in isolation: a *fresh*
+        // context disposes cleanly, a *restored* one does not. The browser has already
+        // invalidated every one of its old objects on loss anyway, so for a restored context
+        // skipping explicit cleanup is both safe and necessary; a never-lost context still
+        // gets torn down properly to avoid leaking GPU resources.
+        if (!this.host.postFxGlRestored) {
+            this._webgl.dispose();
+        }
+        this._webgl = null;
     }
 
     /**

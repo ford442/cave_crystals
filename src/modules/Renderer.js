@@ -74,6 +74,24 @@ export class Renderer {
     }
 
     /**
+     * Effective backend diagnostics for the dev perf overlay and verification scripts:
+     * display context (Canvas2D/WebGL2), capability/loss flags, and the WebGPU particle
+     * compute integrator's live status (already re-probes/downgrades on device loss).
+     * @returns {import('./renderers/canvasContext.js').BackendDiagnostics & {
+     *   particleIntegratorPath: import('./ParticleWorkerBridge.js').IntegratorPath,
+     *   webgpuParticlesReady: boolean,
+     * }}
+     */
+    getBackendDiagnostics() {
+        const status = particleWorkerBridge.getStatus();
+        return {
+            ...this.host.getBackendDiagnostics(),
+            particleIntegratorPath: status.path,
+            webgpuParticlesReady: status.webgpuReady,
+        };
+    }
+
+    /**
      * @param {RenderQualityLevel} [quality]
      * @returns {RenderQualityProfile}
      */

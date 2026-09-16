@@ -2,13 +2,21 @@
 
 import { GAME_CONFIG, RENDER_QUALITY_PROFILES } from '../RendererConstants.js';
 import {
+    attachWebGLContextLossHandling,
+    buildBackendDiagnostics,
     createCanvas2DContext,
+    createWebGL2Context,
     GRAIN_BUFFER_CONTEXT,
     MAIN_CANVAS_CONTEXT,
     OFFSCREEN_FX_CONTEXT,
+    probeWebGL2Support,
+    replaceCanvasElement,
+    WEBGL2_DISPLAY_CONTEXT,
 } from './canvasContext.js';
+/** @import { BackendDiagnostics, DisplayBackendId } from './canvasContext.js' */
 
-/** @typedef {'canvas2d' | 'webgl2'} DisplayMode */
+/** How long to wait after a failed WebGL2 bind attempt before probing again. */
+const WEBGL_RETRY_INTERVAL_MS = 4000;
 
 /**
  * Shared canvas context, caches, and subsystem wiring for composed renderers.
@@ -37,11 +45,22 @@ export class RendererHost {
         const main = createCanvas2DContext(canvas, MAIN_CANVAS_CONTEXT, { retryWithoutDesync: true });
         this.ctx = main.ctx;
         this._desynchronizedActive = main.desynchronizedActive;
-        /** @type {DisplayMode} */
+        /** @type {DisplayBackendId} */
         this._displayMode = 'canvas2d';
         /** @type {WebGL2RenderingContext | null} */
         this.postFxGl = null;
-        this.postFxGlReady = RendererHost.probeWebGL2();
+        this.postFxGlReady = probeWebGL2Support();
+        /** True while the bound WebGL2 context is lost, waiting on `webglcontextrestored`. */
+        this.webglContextLost = false;
+        /** True once `postFxGl` has lived through a loss/restore cycle (see ensureWebGLDisplay). */
+        this.postFxGlRestored = false;
+        /** Bumped whenever `postFxGl` becomes a freshly-usable context (bind or restore). */
+        this.postFxGlGeneration = 0;
+        /** @type {(() => void) | null} */
+        this._detachWebglLossHandling = null;
+        this._webglRetryAt = 0;
+        /** Optional hook invoked with the fresh element whenever the display canvas is swapped. */
+        this.onCanvasReplaced = null;
 
         this.width = canvas.width;
         this.height = canvas.height;
@@ -117,44 +136,65 @@ export class RendererHost {
         this._syncSceneCanvasSize();
     }
 
-    /** @returns {boolean} */
-    static probeWebGL2() {
-        try {
-            const probe = document.createElement('canvas');
-            const gl = probe.getContext('webgl2', {
-                alpha: false,
-                antialias: false,
-                depth: false,
-            });
-            return !!gl;
-        } catch {
-            return false;
-        }
-    }
-
     _syncSceneCanvasSize() {
         this._sceneCanvas.width = this.width;
         this._sceneCanvas.height = this.height;
     }
 
+    /** Swap the display canvas for a fresh, contextless clone (see `replaceCanvasElement`). */
+    _replaceDisplayCanvas() {
+        this.canvas = replaceCanvasElement(this.canvas);
+        this.onCanvasReplaced?.(this.canvas);
+    }
+
+    /**
+     * Ensure the display canvas is bound to WebGL2. A no-op once bound: while merely
+     * *lost* (not rebound away), this intentionally does nothing further and waits for the
+     * browser's own `webglcontextrestored` signal rather than tearing anything down.
+     */
     ensureWebGLDisplay() {
-        if (!this.postFxGlReady) return;
         if (this._displayMode === 'webgl2' && this.postFxGl) return;
 
-        const gl = this.canvas.getContext('webgl2', {
-            alpha: false,
-            antialias: false,
-            depth: false,
-            premultipliedAlpha: false,
-        });
+        const now = performance.now();
+        if (!this.postFxGlReady && now < this._webglRetryAt) return;
+        if (!probeWebGL2Support()) {
+            this.postFxGlReady = false;
+            this._webglRetryAt = now + WEBGL_RETRY_INTERVAL_MS;
+            return;
+        }
+        this.postFxGlReady = true;
+
+        this._replaceDisplayCanvas();
+        const gl = createWebGL2Context(this.canvas, WEBGL2_DISPLAY_CONTEXT);
         if (!gl) {
             console.info('[PostFX] WebGL2 unavailable on display canvas; using Canvas2D post-processing.');
             this.postFxGlReady = false;
+            this._webglRetryAt = now + WEBGL_RETRY_INTERVAL_MS;
             this.ensureCanvas2DDisplay();
             return;
         }
 
+        this._detachWebglLossHandling?.();
+        this.webglContextLost = false;
+        // Once a context has lived through a real loss/restore cycle, this sandbox's software
+        // WebGL implementation crashes on explicit gl.delete*() calls against it after its
+        // canvas is later detached (verified in isolation: a *fresh* context disposes cleanly,
+        // a *restored* one does not). The browser has already invalidated its old objects on
+        // loss anyway, so skipping explicit cleanup for it is both safe and necessary.
+        this.postFxGlRestored = false;
+        this._detachWebglLossHandling = attachWebGLContextLossHandling(this.canvas, {
+            onLost: () => {
+                this.webglContextLost = true;
+            },
+            onRestored: () => {
+                this.webglContextLost = false;
+                this.postFxGlRestored = true;
+                this.postFxGlGeneration++;
+            },
+        });
+
         this.postFxGl = gl;
+        this.postFxGlGeneration++;
         this._displayMode = 'webgl2';
         this.ctx = this._sceneCtx;
         if (this.overlayCanvas) {
@@ -165,10 +205,17 @@ export class RendererHost {
     ensureCanvas2DDisplay() {
         if (this._displayMode === 'canvas2d' && this.ctx && this.ctx.canvas === this.canvas) return;
 
+        if (this._displayMode === 'webgl2') {
+            this._detachWebglLossHandling?.();
+            this._detachWebglLossHandling = null;
+            this._replaceDisplayCanvas();
+        }
+
         const main = createCanvas2DContext(this.canvas, MAIN_CANVAS_CONTEXT, { retryWithoutDesync: true });
         this.ctx = main.ctx;
         this._desynchronizedActive = main.desynchronizedActive;
         this.postFxGl = null;
+        this.webglContextLost = false;
         this._displayMode = 'canvas2d';
         if (this.overlayCanvas) {
             this.overlayCanvas.style.display = 'none';
@@ -179,6 +226,16 @@ export class RendererHost {
         if (this.ctx && !this.scanlinePattern) {
             this.scanlinePattern = this.ctx.createPattern(this.scanlineCanvas, 'repeat');
         }
+    }
+
+    /** @returns {BackendDiagnostics} */
+    getBackendDiagnostics() {
+        return buildBackendDiagnostics({
+            display: this._displayMode,
+            webgl2Supported: this.postFxGlReady,
+            webgl2ContextLost: this.webglContextLost,
+            desynchronizedActive: this._desynchronizedActive,
+        });
     }
 
     /**
@@ -212,12 +269,7 @@ export class RendererHost {
         this._caveGeometry = null;
 
         if (wasWebGL) {
-            const gl = this.canvas.getContext('webgl2', {
-                alpha: false,
-                antialias: false,
-                depth: false,
-                premultipliedAlpha: false,
-            });
+            const gl = createWebGL2Context(this.canvas, WEBGL2_DISPLAY_CONTEXT);
             if (gl) {
                 this.postFxGl = gl;
                 this.ctx = this._sceneCtx;
