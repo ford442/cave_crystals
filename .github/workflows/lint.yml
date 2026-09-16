@@ -31,3 +31,6 @@ jobs:
 
       - name: WASM unit tests
         run: npm run test:unit
+
+      - name: Game unit tests
+        run: npm run test:game

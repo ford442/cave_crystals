@@ -595,6 +595,7 @@ export class HudEffectsRenderer {
     drawDevMetricsOverlay(gameState, profile) {
         const m = gameState.perfMetrics;
         const overrides = gameState.adaptiveOverrides;
+        const backend = this.host.getBackendDiagnostics();
         const postFlags = [
             profile.bloom ? 'B' : '',
             profile.lightShafts ? 'S' : '',
@@ -619,6 +620,8 @@ export class HudEffectsRenderer {
             ...(typeof this.host._desynchronizedActive === 'boolean'
                 ? [`Canvas desync: ${this.host._desynchronizedActive ? 'ON' : 'OFF'}`]
                 : []),
+            `Display ${backend.display}${backend.webgl2ContextLost ? ' (GL lost)' : ''}`
+                + ` · WebGL2 ${backend.webgl2Supported ? 'OK' : 'N/A'} · WebGPU ${backend.webgpuSupported ? 'OK' : 'N/A'}`,
             '[P] toggle · __toggleDevPerf__()'
         ];
 

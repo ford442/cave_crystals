@@ -167,14 +167,15 @@ Two GitHub Actions workflows run on every push to `main` and on pull requests (n
 
 | Workflow | What it gates |
 |----------|---------------|
-| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), WASM unit tests (`test:unit`) |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test (`verify_juice.py`) + blocking post-FX/context assertions (`verify_canvas_context.py`, `verify_webgl_postfx.py`) + non-blocking visual regression (`run_visual.py`) |
+| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), WASM unit tests (`test:unit`), game unit tests (`test:game`) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test (`verify_juice.py`) + blocking post-FX/context assertions (`verify_canvas_context.py`, `verify_webgl_postfx.py`, `verify_backend_recovery.py`) + non-blocking visual regression (`run_visual.py`) |
 
 The smoke job downloads the `dist/` artifact from the build job — it does not run `npm ci`. CI uses `verify_juice.py` (wired as `npm run verify:smoke`) because it asserts audio, save, keyboard, gameplay, and zero page errors.
 
-The **postfx-context** job (`ci.yml`, blocking) runs two scripts that assert rather than pixel-diff, so they don't inherit the flakiness described below:
+The **postfx-context** job (`ci.yml`, blocking) runs scripts that assert rather than pixel-diff, so they don't inherit the flakiness described below:
 - `verify_canvas_context.py` (`npm run verify:canvas-context`) — asserts explicit Canvas2D context attributes (`alpha`, `willReadFrequently`, `desynchronized`) on the main/bloom/grain buffers and sanity-checks a sampled `smoothedFrameMs`. No screenshot, no GPU required.
-- `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'` (always exercised), then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot **only** when a real WebGL2 context is available. Because `CHROMIUM_ARGS` includes `--disable-gpu` (needed for headless container reliability), CI never actually has a WebGL2 context, so the WebGL branch always takes the `[skip]` path — the Canvas2D fallback assertion is what's actually enforced today. This script is intentionally **not** in `visual_manifest.py`: there is no way to capture a stable WebGL baseline without GPU in CI, so gating on backend correctness (which always runs) is the honest contract instead of a pixel diff that would only ever run locally on GPU-capable machines.
+- `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'`, then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot. `CHROMIUM_ARGS` includes `--disable-gpu`, but Chromium's bundled SwiftShader software rasterizer still serves a real (if slow) WebGL2 context in that mode, so this branch genuinely executes in CI rather than always skipping — the `[skip]` path only triggers on a browser/environment with no WebGL2 at all. This script is intentionally **not** in `visual_manifest.py`: a software-rendered WebGL baseline isn't stable enough to pixel-diff, so gating on backend correctness (which always runs) is the honest contract instead of a pixel diff.
+- `verify_backend_recovery.py` (`npm run verify:backend-recovery`) — asserts WebGL2 actually binds to `#gameCanvas` at high quality (not just the capability probe), forces a real context loss/restore cycle via `WEBGL_lose_context` and asserts the automatic Canvas2D fallback and recovery, and round-trips Canvas2D↔WebGL2 through quality changes. See "Render backend policy, context loss, and diagnostics" below.
 
 The **visual** job (also in `ci.yml`, `continue-on-error: true`) runs `python3 verification/run_visual.py`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
 
@@ -184,12 +185,13 @@ Reproduce CI locally:
 
 ```bash
 npm ci
-npm run lint && npm run typecheck && npm run test:lint && npm run test:unit   # lint.yml
+npm run lint && npm run typecheck && npm run test:lint && npm run test:unit && npm run test:game   # lint.yml
 npm run build                                                                  # ci.yml build job
 pip install -r verification/requirements.txt && python3 -m playwright install chromium --with-deps
 python3 verification/verify_juice.py                                           # ci.yml smoke job
 python3 verification/verify_canvas_context.py                                  # ci.yml postfx-context job
 python3 verification/verify_webgl_postfx.py                                    # ci.yml postfx-context job
+python3 verification/verify_backend_recovery.py                               # ci.yml postfx-context job
 python3 verification/run_visual.py                                               # ci.yml visual job (non-blocking)
 # or: npm run verify   # build + verify_juice.py
 ```
@@ -338,12 +340,12 @@ At **`renderQuality === 'high'`** with bloom enabled, the game auto-selects a **
 
 | Backend | When | Core passes | Canvas2D overlays |
 |---------|------|-------------|-------------------|
-| `webgl2` | High + `host.postFxGlReady` | Threshold bloom (Kawase), chroma + vignette, grade + grain on `#gameCanvas` | Light shafts, scanlines, glitch, `CRITICAL!` text, impact flash on `#postOverlayCanvas` |
+| `webgl2` | High + `host.postFxGlReady` (and not currently context-lost) | Threshold bloom (Kawase), chroma + vignette, grade + grain on `#gameCanvas` | Light shafts, scanlines, glitch, `CRITICAL!` text, impact flash on `#postOverlayCanvas` |
 | `canvas2d` | Fallback | Full stack on `#gameCanvas` 2D context | N/A (same canvas) |
 
 **Scene capture:** When WebGL is active, the 2D scene (lighting through particles) renders to a hidden `_sceneCanvas`; each frame uploads to a GPU texture for the shader chain.
 
-**Debug / test overrides:** `window.__FORCE_WEBGL_POSTFX__ = true` or `window.__FORCE_CANVAS_POSTFX__ = true` before load. Inspect `game.renderer.postFxBackend` (`'webgl2' | 'canvas2d'`).
+**Debug / test overrides:** `window.__FORCE_WEBGL_POSTFX__ = true` or `window.__FORCE_CANVAS_POSTFX__ = true` before load. Inspect `game.renderer.postFxBackend` (`'webgl2' | 'canvas2d'`) or the richer `game.renderer.getBackendDiagnostics()` (below).
 
 **GPU memory (approximate, scales with pixel count):**
 
@@ -356,9 +358,9 @@ At **`renderQuality === 'high'`** with bloom enabled, the game auto-selects a **
 
 FBOs are rebuilt on resize; WebGL is only acquired on the display canvas while the high-quality backend is active.
 
-**Verification:** `python3 verification/verify_webgl_postfx.py` (programmatic backend assertions + optional screenshot), wired as a blocking CI step (`postfx-context` job in `ci.yml`). Not in the pixel-diff visual manifest — CI runs headless with `--disable-gpu`, so the WebGL2 branch (and its threshold-bloom screenshot) never actually executes there; the Canvas2D fallback assertion is the part that's really gated. See "Continuous integration" above.
+**Verification:** `python3 verification/verify_webgl_postfx.py` (programmatic backend assertions + optional screenshot) and `python3 verification/verify_backend_recovery.py` (forced context loss/restore + quality-driven backend round-trips), both wired as blocking CI steps (`postfx-context` job in `ci.yml`). Neither is in the pixel-diff visual manifest. Chromium's bundled SwiftShader software rasterizer serves a real (if slow) WebGL2 context even under `--disable-gpu`, so the WebGL2 branch does actually execute in CI — it is not merely skipped. See "Continuous integration" above.
 
-**Key files:** `src/modules/renderers/postfx/PostFxUniforms.js`, `Canvas2DPostFxBackend.js`, `WebGL2PostFxBackend.js`, `src/modules/renderers/webgl/glUtils.js`, `src/modules/renderers/webgl/shaders.js`.
+**Key files:** `src/modules/renderers/canvasContext.js`, `src/modules/renderers/postfx/PostFxUniforms.js`, `Canvas2DPostFxBackend.js`, `WebGL2PostFxBackend.js`, `src/modules/renderers/webgl/glUtils.js`, `src/modules/renderers/webgl/shaders.js`.
 
 ### Canvas 2D context attributes
 
@@ -381,6 +383,18 @@ All canvas contexts are created in `src/modules/renderers/RendererHost.js` via p
 4. Optional: Chrome DevTools → Performance with 4× CPU throttle + mobile device emulation.
 
 **Automated check:** `python3 verification/verify_canvas_context.py` asserts context attributes and logs a short frame-time sample (sanity guard, not a benchmark). Wired as a blocking CI step (`postfx-context` job in `ci.yml`) — no GPU or screenshot required, so it's cheap and stable enough to gate on directly.
+
+### Render backend policy, context loss, and diagnostics
+
+`src/modules/renderers/canvasContext.js` is the single module owning display-backend policy for the renderer: the Canvas2D/WebGL2 context option presets (above), capability probes (`probeWebGL2Support`, `probeWebGPUSupport`), the pure `resolveDisplayBackend()` decision function, and `buildBackendDiagnostics()`. `RendererHost` and `PostEffectsRenderer` are thin consumers of it, not where the policy lives.
+
+**Why a canvas swap:** a `<canvas>` element's context type (`2d` vs `webgl2`) is fixed for its lifetime — a second `getContext()` call for a different type returns `null` rather than switching. Because `#gameCanvas` starts bound to a `2d` context (for the pre-high-quality frames), moving it to WebGL2 the first time quality goes high — and moving back on every subsequent quality change — replaces it with a fresh, contextless clone (`replaceCanvasElement()`; same id/class/attributes/pixel size, no listeners). `RendererHost.canvas` always points at the live element; `game.canvas` is a getter that forwards to it, and pointer/touch input is bound to the stable `#gameContainer` (event bubbling) rather than the canvas itself, so a swap never silently drops a listener.
+
+**Context loss / restore:** `RendererHost` attaches `webglcontextlost`/`webglcontextrestored` listeners to the display canvas whenever it binds WebGL2 (`event.preventDefault()` on loss, as required for the browser to ever fire restore). While lost, `host.webglContextLost` is true, `resolveDisplayBackend()` falls back to Canvas2D for that frame's content *without* rebinding or swapping the canvas — the GPU context stays in place so a native restore can still happen. On restore, `host.postFxGlGeneration` is bumped so `PostEffectsRenderer` rebuilds its `WebGL2PostFxBackend` (shaders/FBOs are invalidated by any real loss). `host.postFxGlRestored` marks a context that has lived through that cycle: this sandbox's software WebGL implementation was found to crash on explicit `gl.delete*()` calls against such a context once its canvas is later detached, so teardown skips explicit disposal for it (the browser already invalidated every old object on loss; a never-lost context still disposes normally to avoid leaking GPU resources).
+
+**Diagnostics:** `game.renderer.getBackendDiagnostics()` returns `{ display, webgl2Supported, webgl2ContextLost, webgpuSupported, desynchronizedActive, particleIntegratorPath, webgpuParticlesReady }` — the last two proxy the existing WebGPU particle compute integrator's own live status (`ParticleWorkerBridge`/`WebGpuParticleIntegrator`, which already re-probes/downgrades on `GPUDevice.lost`). The dev perf overlay (`HudEffectsRenderer.drawDevMetricsOverlay`) renders a `Display … · WebGL2 … · WebGPU …` line from the same call.
+
+**Verification:** `test/game/renderBackend.test.mjs` unit-tests the pure policy/diagnostics functions (no DOM). `verification/verify_backend_recovery.py` drives the real game end-to-end: asserts WebGL2 actually engages at high quality, forces a real context loss via `WEBGL_lose_context` and asserts the automatic fallback and restore, and round-trips Canvas2D↔WebGL2 via quality changes. The loss/restore/quality-switch sequence runs inside a single `page.evaluate()` call rather than several separate Playwright round-trips — see the script's docstring for why (driving it step-by-step while the game's own render loop keeps running was observed to destabilize this sandbox's software WebGL implementation, independent of the app logic being exercised).
 
 ### Entity types
 - `Crystal` — top/bottom lane crystals with elastic scale animation, flash, critical state, and seeded shard configurations.
