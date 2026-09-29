@@ -1,5 +1,8 @@
 name: Lint
 
+# Node half of the merge gate. Must stay identical to `npm run test:ci`.
+# The full local gate (this job + the blocking ci.yml jobs) is `npm run verify:ci`.
+
 on:
   pull_request:
   push:
@@ -20,17 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
-        run: npm run lint
-
-      - name: TypeScript check (JSDoc contracts)
-        run: npm run typecheck
-
-      - name: Lint regression fixtures
-        run: npm run test:lint
-
-      - name: WASM unit tests
-        run: npm run test:unit
-
-      - name: Game unit tests
-        run: npm run test:game
+      - name: Node CI gate
+        run: npm run test:ci

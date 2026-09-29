@@ -56,6 +56,15 @@ Gameplay RNG seeding (`setSeed` / `jsSetSeed`) and replay determinism tiers are 
 
 Boss formation authoring (`bosses.json`, phase timings, rewards) is documented in [`BOSSES.md`](./BOSSES.md).
 
+## Build targets
+
+| Command | WASM target | Why |
+|---------|-------------|-----|
+| `npm run dev`, `npm run dev:watch`, `npm run build` | **release only** | The app and the Vite bundle load `build/release.wasm`. Debug is unused here. |
+| `npm run test:unit` (part of `npm run verify:ci`) | **debug** | Assertions and source maps for ABI/parity failures. |
+| `npm run test:wasm` | **release** | On-demand check of the optimized artifact. Not part of the merge gate. |
+| `npm run asbuild` | debug and release | Explicit local compile of both targets. `dev` and `build` do not call it. |
+
 ## Contract tests
 
 Primary dev/CI gate (compiles debug WASM with assertions and source maps):

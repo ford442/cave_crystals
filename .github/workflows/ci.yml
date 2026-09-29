@@ -1,5 +1,9 @@
 name: CI
 
+# Browser half of the merge gate, after `npm run build`.
+# Blocking jobs (build, smoke, postfx-context) plus `npm run test:ci` are `npm run verify:ci`.
+# The visual job stays non-blocking and is not part of that command.
+
 on:
   push:
     branches:
@@ -59,8 +63,15 @@ jobs:
           pip install -r verification/requirements.txt
           python3 -m playwright install chromium --with-deps
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Run smoke test
-        run: python3 verification/verify_juice.py
+        run: npm run verify:smoke
+
+      - name: Run PWA offline test
+        run: npm run verify:pwa
 
       - name: Upload failure artifacts
         if: failure()
@@ -101,14 +112,12 @@ jobs:
           pip install -r verification/requirements.txt
           python3 -m playwright install chromium --with-deps
 
-      - name: Canvas2D context attribute smoke
-        run: python3 verification/verify_canvas_context.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: WebGL/Canvas2D post-FX backend assertions
-        run: python3 verification/verify_webgl_postfx.py
-
-      - name: Render backend fallback/recovery assertions
-        run: python3 verification/verify_backend_recovery.py
+      - name: Post-FX and render-backend assertions
+        run: npm run verify:postfx
 
   visual:
     needs: build
@@ -140,8 +149,12 @@ jobs:
           pip install -r verification/requirements.txt
           python3 -m playwright install chromium --with-deps
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Run visual regression
-        run: python3 verification/run_visual.py
+        run: npm run verify:visual
 
       - name: Upload visual failure artifacts
         if: failure()

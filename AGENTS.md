@@ -59,7 +59,7 @@ Install dependencies first:
 npm install
 ```
 
-Development (compiles WASM once, then starts Vite — no AssemblyScript watch):
+Development (compiles release WASM once, then starts Vite — no AssemblyScript watch):
 
 ```bash
 npm run dev
@@ -73,7 +73,7 @@ npm run dev:watch
 
 `ASC_WATCH=1` enables a Vite dev-server plugin (`scripts/assemblyscript-watch-plugin.js`) because the ASC CLI has no `--watch` flag. The app loads `build/release.js` bindings in dev, so only the **release** target is rebuilt.
 
-Production build (compiles WASM debug + release, then Vite bundles to `dist/`):
+Production build (compiles release WASM only, then Vite bundles to `dist/`):
 
 ```bash
 npm run build
@@ -91,21 +91,19 @@ Preview production build locally:
 npm run preview
 ```
 
-Build WASM only (debug + release):
+Build both WASM targets (debug and release). Not used by `dev` or `build`:
 
 ```bash
 npm run asbuild
 ```
 
-Validate WASM ABI and JS/WASM parity (requires release build):
-
-Validate WASM ABI and JS/WASM parity after building:
+Debug WASM (assertions and source maps) is compiled by the unit/parity gate:
 
 ```bash
 npm run test:unit
 ```
 
-For the shipping `release.wasm` artifact:
+On-demand parity check against the shipping `release.wasm` artifact (not part of `verify:ci`):
 
 ```bash
 npm run test:wasm
@@ -157,7 +155,7 @@ See `docs/WASM.md` for what belongs in WASM vs JavaScript.
   - `seed` → `Math.random()`
 - The WASM module includes a custom LCG random number generator (`fastRandom`) seeded from JS.
 - **JS fallback behavior**: `WasmManager` provides JS fallbacks for every export. For trivial math (e.g., `calculateCrystalGrowth`, `calculateGrowthMultiplier`, `checkCrystalGameOver`), the manager intentionally always uses JS to avoid WASM call overhead. Functions that may actually invoke WASM when ready include collision detection (`checkCollisions`), particle velocity helpers (`getShatterVx`, `getDirectionalVx`, etc.), bounce physics (`getBounceVy`), smoke drift (`getSmokeVx`), and homing steering (`calculateHomingVx`/`Vy`).
-- **Contract tests**: `npm run test:unit` compiles debug WASM and validates ABI + JS/WASM parity (CI gate). `npm run test:wasm` runs the same suite against `release.wasm`. See `docs/WASM.md`.
+- **Contract tests**: `npm run test:unit` compiles debug WASM and validates ABI + JS/WASM parity (part of `npm run verify:ci`). `npm run test:wasm` runs the same suite against `release.wasm` on demand. See `docs/WASM.md`.
 
 ## Testing / Verification
 
@@ -167,8 +165,10 @@ Two GitHub Actions workflows run on every push to `main` and on pull requests (n
 
 | Workflow | What it gates |
 |----------|---------------|
-| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), WASM unit tests (`test:unit`), game unit tests (`test:game`) |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test (`verify_juice.py`) + blocking post-FX/context assertions (`verify_canvas_context.py`, `verify_webgl_postfx.py`, `verify_backend_recovery.py`) + non-blocking visual regression (`run_visual.py`) |
+| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | `npm run test:ci` — ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), debug WASM unit tests (`test:unit`), power-ups (`test:powerups`), audio (`test:audio`), game (`test:game`, includes replay), save (`test:save`), and `test/scripts/ci-gate.test.mjs` (script/workflow agreement) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Release production build (`npm run build`) + Playwright smoke (`verify:smoke`) + PWA offline (`verify:pwa`) + blocking post-FX/context assertions (`verify:postfx`) + non-blocking visual regression (`verify:visual`) |
+
+The blocking jobs are one local command: `npm run verify:ci` (`test:ci`, then `build`, `verify:smoke`, `verify:pwa`, and `verify:postfx`). `verify:visual` stays outside that command. `test:replay` is not a separate step because `test:game` already runs `test/game/*.test.mjs`. `test:wasm` stays on demand so the merge gate's assertion/source-map build is the debug target only.
 
 The smoke job downloads the `dist/` artifact from the build job — it does not run `npm ci`. CI uses `verify_juice.py` (wired as `npm run verify:smoke`) because it asserts audio, save, keyboard, gameplay, and zero page errors.
 
@@ -177,24 +177,19 @@ The **postfx-context** job (`ci.yml`, blocking) runs scripts that assert rather 
 - `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'`, then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot. `CHROMIUM_ARGS` includes `--disable-gpu`, but Chromium's bundled SwiftShader software rasterizer still serves a real (if slow) WebGL2 context in that mode, so this branch genuinely executes in CI rather than always skipping — the `[skip]` path only triggers on a browser/environment with no WebGL2 at all. This script is intentionally **not** in `visual_manifest.py`: a software-rendered WebGL baseline isn't stable enough to pixel-diff, so gating on backend correctness (which always runs) is the honest contract instead of a pixel diff.
 - `verify_backend_recovery.py` (`npm run verify:backend-recovery`) — asserts WebGL2 actually binds to `#gameCanvas` at high quality (not just the capability probe), forces a real context loss/restore cycle via `WEBGL_lose_context` and asserts the automatic Canvas2D fallback and recovery, and round-trips Canvas2D↔WebGL2 through quality changes. See "Render backend policy, context loss, and diagnostics" below.
 
-The **visual** job (also in `ci.yml`, `continue-on-error: true`) runs `python3 verification/run_visual.py`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
+The **visual** job (also in `ci.yml`, `continue-on-error: true`) runs `npm run verify:visual`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
 
 **Known limitation — do not flip `continue-on-error` to `false` without fixing this first:** the six canonical scripts only freeze rendering (`screenshot_utils.freeze_visual_loop`) for the final capture. Everything before that — mouse clicks, `advance(page, ms)` — runs the *live* game loop across however many real `requestAnimationFrame` ticks happen to land in that wall-clock window. On a resource-contended sandbox this is measured to produce **17–99% pixel divergence between two consecutive runs of the same script against the same `dist/`, with zero code changes** (e.g. `verify_renderer_composition.py` run twice back-to-back: 78.75% different). Seeding `Math.random` does not fix this because the *number* of ticks (and therefore RNG draws) varies with real frame timing, not just their values. Until the pre-capture interaction sequence is driven deterministically (fixed-step `game.loop(ts)` calls instead of real-time `advance()`, or CDP virtual time), flipping this job to blocking will make it fail PRs at random. Treat baseline refreshes with the same caution: don't run `update_baselines.py` from a loaded/shared machine and commit the result — verify run-to-run stability first (e.g. run the target script twice and diff the two outputs against each other, not just against the baseline).
 
-Reproduce CI locally:
+Reproduce the blocking CI gate locally:
 
 ```bash
 npm ci
-npm run lint && npm run typecheck && npm run test:lint && npm run test:unit && npm run test:game   # lint.yml
-npm run build                                                                  # ci.yml build job
 pip install -r verification/requirements.txt && python3 -m playwright install chromium --with-deps
-python3 verification/verify_juice.py                                           # ci.yml smoke job
-python3 verification/verify_canvas_context.py                                  # ci.yml postfx-context job
-python3 verification/verify_webgl_postfx.py                                    # ci.yml postfx-context job
-python3 verification/verify_backend_recovery.py                               # ci.yml postfx-context job
-python3 verification/run_visual.py                                               # ci.yml visual job (non-blocking)
-# or: npm run verify   # build + verify_juice.py
+npm run verify:ci
 ```
+
+`npm run test:ci` is the Lint workflow alone. `npm run verify` is release build plus `verify:smoke` only. The non-blocking visual job is `npm run verify:visual`.
 
 ### Visual regression baselines
 
@@ -259,12 +254,13 @@ Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Pla
 ### Running verification
 
 ```bash
-npm run build          # or: npm run verify:build
-npm run verify          # build + one fast Playwright smoke test (verify_juice.py)
-npm run verify:smoke    # just the smoke test, assumes dist/ already built
-npm run verify:canvas-context # Canvas2D context attribute + frame-pacing assertions, no GPU/screenshot needed
-npm run verify:webgl-postfx   # WebGL2/Canvas2D post-FX backend assertions (screenshot only if GPU present)
-npm run verify:visual         # canonical scripts + baseline pixel-diff gate
+npm run verify:ci      # full blocking merge gate (node tests + release build + smoke + PWA + post-FX)
+npm run build          # or: npm run verify:build (release WASM + Vite)
+npm run verify         # release build + one fast Playwright smoke test (verify_juice.py)
+npm run verify:smoke   # just the smoke test, assumes dist/ already built
+npm run verify:pwa     # offline service-worker assertions, assumes dist/ already built
+npm run verify:postfx  # canvas-context + webgl post-FX + backend recovery
+npm run verify:visual  # canonical scripts + baseline pixel-diff gate (non-blocking in CI)
 npm run verify:visual:update  # refresh verification/baselines/ after intentional art changes
 npm run verify:visual:all     # run every verification/verify_*.py script, print a summary
 python3 verification/verify_game_http.py   # run any individual script directly
@@ -445,7 +441,7 @@ Visual-only particle integration (trail, dust, aura/ember) can run on a **Dedica
 
 Dependencies are refreshed automatically by the startup update script (`npm install`, plus `playwright` + its Chromium browser for the Python verification scripts). Below are the non-obvious runtime caveats; standard commands live in the Build/Verification sections above.
 
-- **Dev server**: `npm run dev` serves on `http://localhost:5173/` (Vite default) and recompiles WASM once before starting. Use `npm run dev:watch` when editing `src/assembly/*.ts` — it rebuilds release WASM on save and full-reloads the page. Both are foreground/long-running processes; run them in a persistent shell (tmux), not a blocking one-shot.
+- **Dev server**: `npm run dev` serves on `http://localhost:5173/` (Vite default) and compiles release WASM once before starting. Use `npm run dev:watch` when editing `src/assembly/*.ts` — it rebuilds release WASM on save and full-reloads the page. Both are foreground/long-running processes; run them in a persistent shell (tmux), not a blocking one-shot.
 - **Playwright CLI is not on PATH**: `pip install playwright` puts the `playwright` script in `~/.local/bin`, which isn't on PATH here. Always invoke it as `python3 -m playwright ...` (e.g. `python3 -m playwright install chromium`). Likewise the verification scripts use `python3`, never `python`.
 - **Verification needs a build first**: `npm run verify:smoke` and `npm run verify:visual` run headless Chromium against `dist/`, so run `npm run build` (or `npm run verify:build`) beforehand or they'll test a stale/missing bundle. `npm run verify` bundles the build + smoke test together. Each script starts its own static server on a free port, so nothing needs to be running first.
 - **Everything runs locally, no secrets/services**: The game is a static client-side app with no backend. `deploy.py` is for production deploys only and requires `DEPLOY_TOKEN` from env or a gitignored local config — do not run it in routine dev setup.
