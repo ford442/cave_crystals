@@ -57,10 +57,11 @@ The project emphasizes **"game juice"** — extensive screen shake, chromatic ab
 
 ```bash
 npm install          # Install dependencies (required first)
-npm run dev          # Compile WASM + start Vite dev server (http://localhost:5173)
-npm run build        # Compile WASM (debug + release) + Vite production build to dist/
+npm run dev          # Compile release WASM + start Vite dev server (http://localhost:5173)
+npm run build        # Compile release WASM + Vite production build to dist/
 npm run preview      # Preview the production build locally
-npm run asbuild      # Build WASM only (debug + release)
+npm run asbuild      # Build both WASM targets (debug + release); not used by dev/build
+npm run verify:ci    # Full blocking merge gate (see README CI)
 ```
 
 **Important Vite config notes** (vite.config.js):

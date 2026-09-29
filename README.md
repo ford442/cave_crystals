@@ -39,10 +39,13 @@ python3 -m playwright install chromium --with-deps
 
 Each script starts its own static server on an available port via `verification/server.py`, so nothing needs to be running beforehand.
 
-- `npm run verify` — build, then run one fast Playwright smoke test. This is the single command for a clean-shell check.
-- `npm run verify:build` — just the production build.
+- `npm run verify:ci` — full merge gate: Node checks, release production build, smoke test, PWA offline check, and post-FX/backend assertions. This is the command that must pass before merge.
+- `npm run verify` — release build, then one fast Playwright smoke test.
+- `npm run verify:build` — release WASM plus the Vite production build.
 - `npm run verify:smoke` — just the smoke test (assumes `dist/` is already built).
-- `npm run verify:visual` — run six canonical scripts and fail when canvas screenshots diverge from `verification/baselines/`.
+- `npm run verify:pwa` — service worker, manifest, and offline-boot assertions (assumes `dist/` is already built).
+- `npm run verify:postfx` — Canvas2D context, WebGL/Canvas2D post-FX, and backend recovery assertions.
+- `npm run verify:visual` — run six canonical scripts and fail when canvas screenshots diverge from `verification/baselines/`. Non-blocking in CI.
 - `npm run verify:visual:update` — refresh committed baselines after intentional art/VFX changes.
 - `npm run verify:visual:all` — run the full Playwright battery without baseline comparison.
 
@@ -50,29 +53,24 @@ Screenshots are written under `verification/` and logged as `[screenshot] <path>
 
 ## CI
 
-GitHub Actions runs two workflows on every push to `main` and on pull requests (no secrets required):
+GitHub Actions runs two workflows on every push to `main` and on pull requests (no secrets required). Together, their **blocking** jobs are exactly `npm run verify:ci`.
 
 | Workflow | What it checks |
 |----------|----------------|
-| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures, WASM unit tests |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Production build (`npm run build`) + Playwright smoke test + non-blocking visual regression |
+| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | `npm run test:ci` — ESLint, TypeScript, lint fixtures, debug-WASM unit tests, power-up, audio, game, and save tests, plus a check that these scripts still match the workflows |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | `npm run build` (release WASM only), then `verify:smoke`, `verify:pwa`, and `verify:postfx`. Visual regression (`verify:visual`) runs with `continue-on-error` and is **not** part of `verify:ci`. |
 
-Reproduce CI locally:
+`test:game` already includes replay tests, so `test:replay` is not a separate CI step. `test:wasm` stays an on-demand check of the optimized `release.wasm` artifact (assertions and source maps are the debug target used by `test:unit`).
+
+Reproduce the merge gate locally:
 
 ```bash
 npm ci
-npm run lint && npm run typecheck && npm run test:lint && npm run test:unit   # lint.yml
-npm run build                                                                  # ci.yml build job
 pip install -r verification/requirements.txt && python3 -m playwright install chromium --with-deps
-python3 verification/verify_juice.py                                           # ci.yml smoke job
-python3 verification/run_visual.py                                           # ci.yml visual job (non-blocking)
+npm run verify:ci
 ```
 
-Or use the combined shortcut for the build + smoke path:
-
-```bash
-npm run verify   # build + verify_juice.py
-```
+`npm run verify` is the shorter build-plus-smoke path. `npm run verify:visual` is the optional pixel-diff job.
 
 ## Controls
 
