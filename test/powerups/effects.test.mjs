@@ -94,7 +94,7 @@ describe('PowerUpManager', () => {
         const crystals = [makeCrystal(2, 120), makeCrystal(3, 100)];
         manager.grant(POWER_UP_TYPES.LANE_SHOCKWAVE);
 
-        const result = manager.activateHeld(POWER_UP_TYPES.LANE_SHOCKWAVE, 2, crystals);
+        const result = manager.activateHeld(2, crystals, POWER_UP_TYPES.LANE_SHOCKWAVE);
         assert.ok(result);
         assert.equal(result?.lane, 2);
         assert.equal(result?.affected.length, 1);
