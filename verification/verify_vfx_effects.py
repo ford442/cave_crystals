@@ -13,10 +13,11 @@ import sys
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from screenshot_utils import (
-    advance,
-    capture_deterministic_screenshot,
-    new_deterministic_page,
+from fixed_step import (
+    capture_fixed_step_screenshot,
+    new_fixed_step_page,
+    open_game,
+    step,
 )
 from server import CHROMIUM_ARGS, DistServer
 
@@ -25,18 +26,17 @@ def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
+            page = new_fixed_step_page(browser, viewport={"width": 1280, "height": 800})
 
             console_msgs = []
             page.on("console", lambda msg: console_msgs.append(msg.text))
 
             print(f"Navigating to {server.url}")
-            page.goto(server.url)
-            page.wait_for_selector("#gameCanvas", timeout=10000)
-            advance(page, 1000)
+            open_game(page, server.url)
+            step(page, 1000)
 
             page.click("#startBtn")
-            advance(page, 1000)
+            step(page, 1000)
 
             # ----------------------------------------------------------------
             # 1. Verify energyRings array exists on game state
@@ -160,11 +160,11 @@ def run():
             # 8. Fire some shots to trigger natural VFX
             # ----------------------------------------------------------------
             page.mouse.click(64, 400)
-            advance(page, 300)
+            step(page, 300)
             page.mouse.click(200, 400)
-            advance(page, 300)
+            step(page, 300)
             page.mouse.click(350, 400)
-            advance(page, 1000)
+            step(page, 1000)
 
             snapshot = page.evaluate("""
                 ({
@@ -178,7 +178,7 @@ def run():
             # ----------------------------------------------------------------
             # 9. Screenshot for visual inspection
             # ----------------------------------------------------------------
-            capture_deterministic_screenshot(
+            capture_fixed_step_screenshot(
                 page,
                 os.path.join(os.path.dirname(__file__), "vfx_effects_screenshot.png"),
             )

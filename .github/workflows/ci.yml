@@ -1,8 +1,9 @@
 name: CI
 
 # Browser half of the merge gate, after `npm run build`.
-# Blocking jobs (build, smoke, postfx-context) plus `npm run test:ci` are `npm run verify:ci`.
-# The visual job stays non-blocking and is not part of that command.
+# Blocking jobs (build, smoke, postfx-context, visual) plus `npm run test:ci` are `npm run verify:ci`.
+# The visual job is blocking: canonical scripts step the game with a fixed-step
+# virtual clock (verification/fixed_step.py), so captures do not depend on runner load.
 
 on:
   push:
@@ -121,7 +122,6 @@ jobs:
 
   visual:
     needs: build
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

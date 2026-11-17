@@ -52,6 +52,17 @@ def compare_images(
     if img_a.size != img_b.size:
         img_b = img_b.resize(img_a.size, Image.Resampling.BILINEAR)
 
+    if ImageChops.difference(img_a, img_b).getbbox() is None:
+        # Byte-identical pixels: skip the per-pixel scan (the common case now
+        # that canonical captures are fixed-step deterministic).
+        return DiffResult(
+            baseline_path=baseline,
+            actual_path=actual,
+            diff_ratio=0.0,
+            width=img_a.size[0],
+            height=img_a.size[1],
+        )
+
     pixels_a = img_a.load()
     pixels_b = img_b.load()
     width, height = img_a.size

@@ -49,6 +49,7 @@ describe('merge gate', () => {
         'npm run verify:smoke',
         'npm run verify:pwa',
         'npm run verify:postfx',
+        'npm run verify:visual',
     ].join(' && ');
 
     it('test:ci is the node half and verify:ci is the full blocking gate', () => {
@@ -58,7 +59,6 @@ describe('merge gate', () => {
             scripts['verify:postfx'],
             'npm run verify:canvas-context && npm run verify:webgl-postfx && npm run verify:backend-recovery',
         );
-        assert.doesNotMatch(scripts['verify:ci'], /verify:visual/);
         assert.doesNotMatch(scripts['verify:ci'], /test:wasm/);
     });
 
@@ -72,6 +72,32 @@ describe('merge gate', () => {
         assert.match(ci, /run: npm run verify:pwa\b/);
         assert.match(ci, /run: npm run verify:postfx\b/);
         assert.match(ci, /run: npm run verify:visual\b/);
-        assert.match(ci, /continue-on-error:\s*true/);
+        assert.doesNotMatch(ci, /continue-on-error/, 'every ci.yml job, including visual, is blocking');
+    });
+});
+
+describe('visual gate determinism', () => {
+    const manifest = read('verification/visual_manifest.py');
+    const canonical = [...manifest.matchAll(/(?:ScriptSpec|_single)\(\s*"(verify_\w+\.py)"/g)].map((m) => m[1]);
+
+    it('manifest lists canonical scripts', () => {
+        assert.ok(canonical.length >= 6, `expected canonical scripts, found ${canonical.join(', ')}`);
+    });
+
+    for (const script of canonical) {
+        it(`${script} drives the game with the fixed-step clock`, () => {
+            const src = read(`verification/${script}`);
+            assert.match(src, /from fixed_step import/);
+            assert.match(src, /new_fixed_step_page\(/);
+            assert.match(src, /capture_fixed_step_screenshot\(/);
+            // Wall-clock waits make the number of frames depend on machine load.
+            assert.doesNotMatch(src, /\badvance\(/);
+            assert.doesNotMatch(src, /time\.sleep\(|wait_for_timeout\(/);
+            assert.doesNotMatch(src, /new_deterministic_page|capture_deterministic_screenshot/);
+        });
+    }
+
+    it('requirements pin Playwright so Chromium rasterisation cannot drift', () => {
+        assert.match(read('verification/requirements.txt'), /^playwright==\d+\.\d+\.\d+$/m);
     });
 });

@@ -1,2 +1,4 @@
-playwright
+# Pinned: the bundled Chromium build determines rasterisation, and the visual
+# baselines are a blocking CI gate. Bump deliberately and refresh baselines.
+playwright==1.59.0
 Pillow>=10.0.0
