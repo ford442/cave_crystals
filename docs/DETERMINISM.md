@@ -61,4 +61,6 @@ See also [`WASM.md`](./WASM.md).
 - Unit: `npm run test:replay`
 - Browser golden file: `python3 verification/verify_replay.py` (stepped `runToCompletion`, score tolerance `0`)
 
-Wall-clock Playwright `wait_for_timeout` playback is discouraged; use `ReplayPlayer.runToCompletion()` for stable results.
+- Browser visual baselines: `npm run verify:visual` (blocking). Canonical scripts use the fixed-step virtual clock in [`verification/fixed_step.py`](../verification/fixed_step.py), which virtualizes `requestAnimationFrame`, timers and `performance.now()` and steps whole 16 ms frames of the real `game.loop()`. `npm run verify:visual:stability` asserts that repeated runs are pixel-identical.
+
+Wall-clock Playwright `wait_for_timeout` / `time.sleep` playback is discouraged. Use `ReplayPlayer.runToCompletion()` for gameplay outcomes and `fixed_step.step()` for anything rendered or screenshotted. Under fixed-step, Tier-2 visual RNG is reproducible too, because the seeded `Math.random` is consumed by the same number of frames on every run.

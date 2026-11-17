@@ -197,10 +197,17 @@ export class Game {
         this.systems = registerSystems(this);
 
         // Initialize WASM and particle worker asynchronously
-        wasmManager.init().then(() => {
+        /**
+         * Settles once WASM has loaded or the JS fallback took over. Fixed-step browser tests
+         * await it before stepping any frames so the RNG draw order never depends on load timing.
+         * @type {Promise<boolean>}
+         */
+        this.wasmReady = wasmManager.init().then((ok) => {
             console.log('WASM module initialization complete');
+            return ok;
         }).catch(err => {
             console.warn('WASM initialization failed, using JavaScript fallback:', err);
+            return false;
         });
 
         particleWorkerBridge.init().then((ok) => {

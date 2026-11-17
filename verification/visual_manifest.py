@@ -34,70 +34,43 @@ class ScriptSpec:
     screenshots: tuple[ScreenshotSpec, ...]
 
 
-# Six canonical scripts with canvas-only captures and calibrated thresholds.
-# verify_critical_vignette.py, verify_settings.py, and the game_spore_http frame
-# capture screenshots but are not gated yet (see AGENTS.md).
+# Run-to-run, fixed-step captures are byte-identical (`run_visual.py --repeat`
+# proves it), so these ratios no longer absorb gameplay timing. They only leave
+# headroom for rasteriser/font differences between the machine that recorded the
+# baselines and the CI runner (anti-aliased edges, canvas glyphs). Keep the limit
+# tight: raising the warp-grid line alpha from 0.05 to 0.08 changes only 0.52% of
+# pixels, which a 1% limit would miss. Before the fixed-step harness the limits
+# were 12-18% and runs still flaked. If CI's environment drifts beyond this,
+# commit baselines captured on CI (see AGENTS.md) rather than loosening it.
+CROSS_ENV_MAX_DIFF_RATIO = 0.002
+
+
+def _single(script: str, actual_name: str) -> ScriptSpec:
+    return ScriptSpec(script, (_shot(actual_name),))
+
+
+def _shot(actual_name: str) -> ScreenshotSpec:
+    return ScreenshotSpec(
+        f"verification/{actual_name}",
+        f"verification/baselines/{actual_name}",
+        max_diff_ratio=CROSS_ENV_MAX_DIFF_RATIO,
+    )
+
+
+# Canonical scripts drive the game with fixed_step.py (enforced by
+# test/scripts/ci-gate.test.mjs) and capture #gameCanvas only.
 CANONICAL_VISUALS: tuple[ScriptSpec, ...] = (
-    ScriptSpec(
-        "verify_juice.py",
-        (
-            ScreenshotSpec(
-                "verification/verify_juice.png",
-                "verification/baselines/verify_juice.png",
-                max_diff_ratio=0.18,
-            ),
-        ),
-    ),
-    ScriptSpec(
-        "verify_vfx_effects.py",
-        (
-            ScreenshotSpec(
-                "verification/vfx_effects_screenshot.png",
-                "verification/baselines/vfx_effects_screenshot.png",
-                max_diff_ratio=0.17,
-            ),
-        ),
-    ),
+    _single("verify_juice.py", "verify_juice.png"),
+    _single("verify_vfx_effects.py", "vfx_effects_screenshot.png"),
     ScriptSpec(
         "verify_game_http.py",
-        (
-            ScreenshotSpec(
-                "verification/game_start_http.png",
-                "verification/baselines/game_start_http.png",
-                max_diff_ratio=0.12,
-            ),
-        ),
+        (_shot("game_start_http.png"), _shot("game_spore_http.png")),
     ),
-    ScriptSpec(
-        "verify_renderer_composition.py",
-        (
-            ScreenshotSpec(
-                "verification/verify_renderer_composition.png",
-                "verification/baselines/verify_renderer_composition.png",
-                max_diff_ratio=0.14,
-            ),
-        ),
-    ),
-    ScriptSpec(
-        "verify_warp_grid.py",
-        (
-            ScreenshotSpec(
-                "verification/verify_warp_grid.png",
-                "verification/baselines/verify_warp_grid.png",
-                max_diff_ratio=0.14,
-            ),
-        ),
-    ),
-    ScriptSpec(
-        "verify_breathing.py",
-        (
-            ScreenshotSpec(
-                "verification/breathing_crystals.png",
-                "verification/baselines/breathing_crystals.png",
-                max_diff_ratio=0.14,
-            ),
-        ),
-    ),
+    _single("verify_renderer_composition.py", "verify_renderer_composition.png"),
+    _single("verify_warp_grid.py", "verify_warp_grid.png"),
+    _single("verify_breathing.py", "breathing_crystals.png"),
+    _single("verify_critical_vignette.py", "verify_critical_vignette.png"),
+    _single("verify_settings.py", "verify_settings.png"),
 )
 
 

@@ -1,23 +1,25 @@
-"""Helpers for deterministic Playwright screenshots in visual regression tests."""
+"""Legacy wall-clock screenshot helpers.
+
+New browser verification should use ``fixed_step.py`` instead: it steps the
+game in fixed 16 ms frames on a virtual clock, so results don't depend on how
+many real frames a loaded machine manages to render. Every canonical visual
+script (``visual_manifest.py``) uses it, and ``test/scripts/ci-gate.test.mjs``
+enforces that.
+
+These helpers remain for scripts that intentionally exercise the live
+``requestAnimationFrame`` loop (e.g. the particle worker and WebGL2 backend
+checks), where real timing is part of what is under test.
+"""
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
+from fixed_step import DETERMINISTIC_RNG_INIT
 from server import report_screenshot
 
 # Fixed timestamp keeps sin/cos-driven VFX (vignette pulse, crystal breathe) stable.
 DEFAULT_SNAPSHOT_TIMESTAMP = 1_000_000
-
-DETERMINISTIC_RNG_INIT = """
-(() => {
-    let seed = 0xC0FFEE42;
-    Math.random = () => {
-        seed = (seed * 1664525 + 1013904223) >>> 0;
-        return seed / 0x100000000;
-    };
-})();
-"""
 
 FREEZE_PATCH_JS = """
 () => {
@@ -83,7 +85,12 @@ def new_deterministic_page(browser, viewport=None):
 
 
 def advance(page, milliseconds: int) -> None:
-    """Advance wall-clock time while the game loop runs."""
+    """Sleep in real time while the live game loop runs.
+
+    The number of frames simulated depends on machine load, so anything
+    captured afterwards is not reproducible. Use ``fixed_step.step`` for
+    anything that is compared against a baseline.
+    """
     if milliseconds <= 0:
         return
     time.sleep(milliseconds / 1000)
@@ -109,6 +116,7 @@ def capture_deterministic_screenshot(
         timestamp,
     )
     page.wait_for_timeout(50)
-    page.locator("#gameCanvas").screenshot(path=str(path))
+    # Overlapping DOM (tutorial ring, HUD) runs CSS animations on real time.
+    page.locator("#gameCanvas").screenshot(path=str(path), animations="disabled")
     report_screenshot(str(path))
     page.evaluate(CLEAR_SNAPSHOT_JS)

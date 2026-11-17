@@ -4,10 +4,12 @@ import sys
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from screenshot_utils import (
-    advance,
-    capture_deterministic_screenshot,
-    new_deterministic_page,
+from fixed_step import (
+    capture_fixed_step_screenshot,
+    new_fixed_step_page,
+    open_game,
+    reload_game,
+    step,
 )
 from server import CHROMIUM_ARGS, DistServer
 
@@ -16,20 +18,19 @@ def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
+            page = new_fixed_step_page(browser, viewport={"width": 1280, "height": 800})
             page_errors = []
 
             page.on("pageerror", lambda exc: page_errors.append(str(exc)))
             page.on("console", lambda msg: print(f"Console: {msg.text}"))
 
             print(f"Navigating to {server.url}")
-            page.goto(server.url)
-            page.wait_for_selector("#gameCanvas")
+            open_game(page, server.url)
 
-            advance(page, 1000)
+            step(page, 1000)
 
             page.click("#startBtn")
-            advance(page, 1000)
+            step(page, 1000)
 
             audio_ready = page.evaluate("""
                 () => window.SoundManager
@@ -47,9 +48,8 @@ def run():
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             """)
-            page.reload()
-            page.wait_for_selector("#gameCanvas")
-            advance(page, 500)
+            reload_game(page)
+            step(page, 500)
 
             reduced_motion = page.evaluate("window.game.state.reducedMotion === true")
             print(f"Reduced motion persisted: {reduced_motion}")
@@ -62,12 +62,12 @@ def run():
             assert has_save is True
 
             page.click("#startBtn")
-            advance(page, 500)
+            step(page, 500)
 
             spores_before = page.evaluate("window.game.state.spores.length")
             page.keyboard.press("ArrowRight")
             page.keyboard.press("Space")
-            advance(page, 500)
+            step(page, 500)
             spores_after = page.evaluate("window.game.state.spores.length")
             print(f"Keyboard spores: {spores_before} -> {spores_after}")
             assert spores_after > spores_before
@@ -80,12 +80,12 @@ def run():
             assert has_array == True
 
             page.mouse.click(64, 400)  # Lane 0
-            advance(page, 500)
+            step(page, 500)
             page.mouse.click(200, 400)  # Lane 1
-            advance(page, 500)
+            step(page, 500)
             page.mouse.click(350, 400)  # Lane 2
 
-            advance(page, 8000)
+            step(page, 8000)
 
             active = page.evaluate("window.game.state.active")
             print(f"Game Active: {active}")
@@ -104,7 +104,7 @@ def run():
             soul_len = page.evaluate("window.game.state.soulParticles.length")
             print(f"Soul Particles count (snapshot): {soul_len}")
 
-            capture_deterministic_screenshot(page, "verification/verify_juice.png")
+            capture_fixed_step_screenshot(page, "verification/verify_juice.png")
 
             browser.close()
 

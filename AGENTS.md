@@ -166,20 +166,20 @@ Two GitHub Actions workflows run on every push to `main` and on pull requests (n
 | Workflow | What it gates |
 |----------|---------------|
 | [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | `npm run test:ci` — ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), debug WASM unit tests (`test:unit`), power-ups (`test:powerups`), audio (`test:audio`), game (`test:game`, includes replay), save (`test:save`), and `test/scripts/ci-gate.test.mjs` (script/workflow agreement) |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Release production build (`npm run build`) + Playwright smoke (`verify:smoke`) + PWA offline (`verify:pwa`) + blocking post-FX/context assertions (`verify:postfx`) + non-blocking visual regression (`verify:visual`) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Release production build (`npm run build`) + Playwright smoke (`verify:smoke`) + PWA offline (`verify:pwa`) + post-FX/context assertions (`verify:postfx`) + visual regression (`verify:visual`) — all blocking |
 
-The blocking jobs are one local command: `npm run verify:ci` (`test:ci`, then `build`, `verify:smoke`, `verify:pwa`, and `verify:postfx`). `verify:visual` stays outside that command. `test:replay` is not a separate step because `test:game` already runs `test/game/*.test.mjs`. `test:wasm` stays on demand so the merge gate's assertion/source-map build is the debug target only.
+The blocking jobs are one local command: `npm run verify:ci` (`test:ci`, then `build`, `verify:smoke`, `verify:pwa`, `verify:postfx`, and `verify:visual`). `test:replay` is not a separate step because `test:game` already runs `test/game/*.test.mjs`. `test:wasm` stays on demand so the merge gate's assertion/source-map build is the debug target only.
 
 The smoke job downloads the `dist/` artifact from the build job — it does not run `npm ci`. CI uses `verify_juice.py` (wired as `npm run verify:smoke`) because it asserts audio, save, keyboard, gameplay, and zero page errors.
 
 The **postfx-context** job (`ci.yml`, blocking) runs scripts that assert rather than pixel-diff, so they don't inherit the flakiness described below:
 - `verify_canvas_context.py` (`npm run verify:canvas-context`) — asserts explicit Canvas2D context attributes (`alpha`, `willReadFrequently`, `desynchronized`) on the main/bloom/grain buffers and sanity-checks a sampled `smoothedFrameMs`. No screenshot, no GPU required.
-- `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'`, then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot. `CHROMIUM_ARGS` includes `--disable-gpu`, but Chromium's bundled SwiftShader software rasterizer still serves a real (if slow) WebGL2 context in that mode, so this branch genuinely executes in CI rather than always skipping — the `[skip]` path only triggers on a browser/environment with no WebGL2 at all. This script is intentionally **not** in `visual_manifest.py`: a software-rendered WebGL baseline isn't stable enough to pixel-diff, so gating on backend correctness (which always runs) is the honest contract instead of a pixel diff.
+- `verify_webgl_postfx.py` (`npm run verify:webgl-postfx`) — forces `__FORCE_CANVAS_POSTFX__` and asserts `renderer.postFxBackend === 'canvas2d'`, then forces `__FORCE_WEBGL_POSTFX__` and asserts `postFxBackend === 'webgl2'` plus captures a screenshot. `CHROMIUM_ARGS` includes `--disable-gpu`, but Chromium's bundled SwiftShader software rasterizer still serves a real (if slow) WebGL2 context in that mode, so this branch genuinely executes in CI rather than always skipping — the `[skip]` path only triggers on a browser/environment with no WebGL2 at all. This script is intentionally **not** in `visual_manifest.py`. Stepping software-rendered WebGL2 frame by frame costs about 800 ms per frame headless, so the fixed-step visual gate renders the Canvas2D post-FX path, and the WebGL2 backend is gated on backend correctness instead.
 - `verify_backend_recovery.py` (`npm run verify:backend-recovery`) — asserts WebGL2 actually binds to `#gameCanvas` at high quality (not just the capability probe), forces a real context loss/restore cycle via `WEBGL_lose_context` and asserts the automatic Canvas2D fallback and recovery, and round-trips Canvas2D↔WebGL2 through quality changes. See "Render backend policy, context loss, and diagnostics" below.
 
-The **visual** job (also in `ci.yml`, `continue-on-error: true`) runs `npm run verify:visual`: six canonical scripts capture deterministic `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`.
+The **visual** job (also in `ci.yml`, blocking) runs `npm run verify:visual`: the canonical scripts capture `#gameCanvas` screenshots and compare them to committed baselines under `verification/baselines/` using per-channel pixel diff (Pillow). Failed comparisons write diff images to `verification/diffs/`, uploaded as the `visual-failure-artifacts` CI artifact.
 
-**Known limitation — do not flip `continue-on-error` to `false` without fixing this first:** the six canonical scripts only freeze rendering (`screenshot_utils.freeze_visual_loop`) for the final capture. Everything before that — mouse clicks, `advance(page, ms)` — runs the *live* game loop across however many real `requestAnimationFrame` ticks happen to land in that wall-clock window. On a resource-contended sandbox this is measured to produce **17–99% pixel divergence between two consecutive runs of the same script against the same `dist/`, with zero code changes** (e.g. `verify_renderer_composition.py` run twice back-to-back: 78.75% different). Seeding `Math.random` does not fix this because the *number* of ticks (and therefore RNG draws) varies with real frame timing, not just their values. Until the pre-capture interaction sequence is driven deterministically (fixed-step `game.loop(ts)` calls instead of real-time `advance()`, or CDP virtual time), flipping this job to blocking will make it fail PRs at random. Treat baseline refreshes with the same caution: don't run `update_baselines.py` from a loaded/shared machine and commit the result — verify run-to-run stability first (e.g. run the target script twice and diff the two outputs against each other, not just against the baseline).
+**Why it can block:** canonical scripts drive the game with the fixed-step virtual clock in [`verification/fixed_step.py`](verification/fixed_step.py) instead of sleeping in real time. The old harness slept with `time.sleep()` and froze only the final frame, so how many `requestAnimationFrame` ticks ran (and how many seeded `Math.random` draws they consumed) depended on machine load. Two back-to-back runs of the same script against the same `dist/` differed in 17–99% of pixels, and the adaptive-quality system also dropped `renderQuality` mid-run on a slow machine. With the fixed-step clock, repeated runs are byte-identical, even on a heavily loaded sandbox. `npm run verify:visual:stability` (`run_visual.py --repeat 3`) checks exactly that. See "Fixed-step browser tests" below.
 
 Reproduce the blocking CI gate locally:
 
@@ -189,11 +189,11 @@ pip install -r verification/requirements.txt && python3 -m playwright install ch
 npm run verify:ci
 ```
 
-`npm run test:ci` is the Lint workflow alone. `npm run verify` is release build plus `verify:smoke` only. The non-blocking visual job is `npm run verify:visual`.
+`npm run test:ci` is the Lint workflow alone. `npm run verify` is release build plus `verify:smoke` only. The visual job alone is `npm run verify:visual`.
 
 ### Visual regression baselines
 
-Canonical scripts and thresholds live in [`verification/visual_manifest.py`](verification/visual_manifest.py). `npm run verify:visual` runs those scripts and **fails when canvas screenshots diverge** beyond the configured per-baseline ratio (default pixel threshold: sum of channel deltas ≤ 12).
+Canonical scripts and thresholds live in [`verification/visual_manifest.py`](verification/visual_manifest.py). `npm run verify:visual` runs those scripts and **fails when canvas screenshots diverge** beyond the configured per-baseline ratio (default pixel threshold: sum of channel deltas ≤ 12). Captures are deterministic, so the ratios are small. They only leave room for rasteriser/font differences between the machine that recorded a baseline and the CI runner, not for gameplay timing.
 
 **Update baselines after intentional art/VFX changes:**
 
@@ -204,14 +204,20 @@ python3 verification/update_baselines.py verify_juice.py    # or one script at a
 git add verification/baselines/
 ```
 
+**Recording baselines on CI:** the visual job uploads `verification/*.png` (the fresh captures) as the `visual-failure-artifacts` artifact whenever it fails. Captures are deterministic, so if a PR fails only because the runner's rasteriser or fonts differ from the machine that recorded the baselines, download that artifact and commit its PNGs into `verification/baselines/`. Don't raise `CROSS_ENV_MAX_DIFF_RATIO` (0.2%): a barely visible change, warp-grid line alpha 0.05 → 0.08, moves only 0.52% of pixels.
+
+`update_baselines.py` captures each script twice (`--runs N` for more) and **refuses to write a baseline unless the runs are pixel-identical**, so a nondeterministic scene can't become the reference. `verification/requirements.txt` pins Playwright because its bundled Chromium decides rasterisation. When you bump it, refresh the baselines in the same change.
+
 Helpers:
 
-- [`verification/screenshot_utils.py`](verification/screenshot_utils.py) — seeded `Math.random`, frozen render timestamp, canvas-only capture
+- [`verification/fixed_step.py`](verification/fixed_step.py) — **default for new browser tests**: virtual clock, fixed 16 ms frames, seeded `Math.random`, pinned graphics, canvas-only capture
+- [`verification/screenshot_utils.py`](verification/screenshot_utils.py) — legacy wall-clock helpers (`advance()` sleeps in real time) for scripts that deliberately exercise the live rAF loop
 - [`verification/visual_diff.py`](verification/visual_diff.py) — Pillow pixel-diff comparison
-- [`verification/run_visual.py`](verification/run_visual.py) — canonical runner + baseline gate (backs `npm run verify:visual`)
-- [`verification/update_baselines.py`](verification/update_baselines.py) — refresh committed PNGs (backs `npm run verify:visual:update`)
+- [`verification/visual_stability.py`](verification/visual_stability.py) — repeated-capture, zero-tolerance run-to-run comparison
+- [`verification/run_visual.py`](verification/run_visual.py) — canonical runner + baseline gate (backs `npm run verify:visual`; `--repeat N` also asserts run-to-run identity)
+- [`verification/update_baselines.py`](verification/update_baselines.py) — refresh committed PNGs after a stability check (backs `npm run verify:visual:update`)
 
-`verify_critical_vignette.py`, `verify_settings.py`, and the `game_spore_http` frame capture screenshots but are not gated yet — their scenes are still too variable for stable pixel diff (see the real-time `advance()` limitation above; revisit once the canonical scripts get deterministic frame-stepping). `verify_webgl_postfx.py` captures a screenshot only when a real GPU is present and is gated on its backend assertions instead (see above), not a pixel baseline. `npm run verify:visual:all` runs the full `run_all.py` battery without baseline comparison.
+`verify_webgl_postfx.py` captures a screenshot only when a real GPU is present and is gated on its backend assertions instead (see above), not a pixel baseline. `npm run verify:visual:all` runs the full `run_all.py` battery without baseline comparison.
 
 ### Replay recording and playback
 
@@ -231,6 +237,35 @@ Session replays use versioned `.ccreplay` JSON files. See [`docs/REPLAY.md`](doc
 
 Playwright replay tests must use `ReplayPlayer.runToCompletion()` (fixed 16 ms steps), not wall-clock waits.
 
+### Fixed-step browser tests
+
+[`verification/fixed_step.py`](verification/fixed_step.py) is the default pattern for browser verification that asserts on or screenshots game state. Its init script replaces `requestAnimationFrame`, `setTimeout`/`setInterval` and `performance.now()` in the page's main world, so **no frame runs until the test calls `step(page, ms)`**. Each step runs `round(ms / 16)` frames in one `page.evaluate`. A frame fires due timers, then the queued rAF callbacks with the virtual timestamp, then drains microtasks. Every frame runs the whole real `game.loop()`, but only the last frame of each `step()` is painted: `Renderer#draw` is a no-op for the others. Software drawing is most of a headless frame's cost, and the renderer writes only its own caches, never simulation state. Before this, `verify_juice.py` took 571 s on a loaded sandbox. Now it takes 17 s. Pass `step(page, ms, draw_every_frame=True)` if a test depends on renderer history. Playwright's own actions, waits and screenshots run in an isolated world with real clocks and work as usual. DOM input is handled immediately and seen by the next stepped frame.
+
+```python
+from fixed_step import new_fixed_step_page, open_game, step, capture_fixed_step_screenshot
+
+page = new_fixed_step_page(browser, viewport={"width": 1280, "height": 800})
+open_game(page, server.url)   # goto, await game.wasmReady, pin graphics=high; zero frames run
+page.click("#startBtn")
+step(page, 500)               # 31 frames of virtual time
+capture_fixed_step_screenshot(page, "verification/foo.png")
+```
+
+What the context pins, and why:
+
+| Pin | Reason |
+|-----|--------|
+| Seeded `Math.random` (`DETERMINISTIC_RNG_INIT`) | Tier-2 juice RNG and the run seed come from `Math.random`. |
+| Virtual rAF / timers / `performance.now` | The frame count and `dt` no longer depend on wall-clock time. Covers gameplay `setTimeout`s (level transition, game-over overlay) and `performance.now()` reads (spawn elastic, input suppression, quality cooldowns). |
+| `open_game` awaits `game.wasmReady` before frame 1 | WASM load draws from `Math.random` and switches particle helpers from JS to WASM. |
+| `graphics = high` through the settings `<select>` | `auto` lets the adaptive-quality system change tiers from frame timings. Set via the UI so it persists across `reload_game()` and `startGame()`. |
+| `__FORCE_CANVAS_POSTFX__` | Software WebGL2 (SwiftShader) costs about 800 ms per frame headless, versus about 5 ms for Canvas2D at high quality. WebGL2 keeps its own assertion gate (`verify:postfx`). |
+| `__PARTICLE_WORKER__ = false`, `__PARTICLE_WEBGPU__ = false` | Worker `postMessage` results and WebGPU readbacks arrive at wall-clock-dependent times. Particles use the main-thread fallback. |
+| Screenshots taken with `animations="disabled"` | The `#gameCanvas` element screenshot includes DOM overlays, and their CSS animations run on the compositor's real clock (the tutorial focus ring pulses `scale(1.01)` forever). Without this, captures differed by 2–5% between runs. |
+| External requests aborted | `style.css` `@import`s a Google Fonts face that canvas text uses. Whether it has loaded would change the glyphs. |
+
+Use `capture_fixed_step_screenshot(page, path, redraw=True)` (or `render_frame(page)`) after injecting state with `page.evaluate` when the injected values must render as-is without an `update()` running first. `test/scripts/ci-gate.test.mjs` fails if a canonical script imports the wall-clock helpers or calls `advance()`, `time.sleep()` or `wait_for_timeout()`.
+
 ### Playwright verification scripts
 
 The `verification/` directory contains Python scripts using **Playwright** to test game features visually, plus two shared support files:
@@ -243,9 +278,9 @@ Every script is self-contained: it starts its own server via `DistServer` (or, f
 Typical test flow:
 1. `with DistServer() as server:` to serve `dist/`.
 2. Launch headless Chromium with `args=CHROMIUM_ARGS`.
-3. Navigate to `server.url`, wait for `#gameCanvas`, click `#startBtn`.
-4. Inject game state or simulate input via `page.evaluate()` / `page.mouse.click()`.
-5. Take screenshots to `verification/`, reporting them via `report_screenshot()`.
+3. Create the page with `new_fixed_step_page()` and call `open_game(page, server.url)`, then click `#startBtn`.
+4. Inject game state or simulate input via `page.evaluate()` / `page.mouse.click()`, advancing with `step(page, ms)` (never `time.sleep()` / `wait_for_timeout()`).
+5. Take screenshots to `verification/` with `capture_fixed_step_screenshot()` (which reports them via `report_screenshot()`).
 
 Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Playwright APIs are used across different scripts; async scripts call `DistServer().start()` / `.stop()` manually instead of using the `with` block.
 
@@ -254,13 +289,14 @@ Both **sync** (`playwright.sync_api`) and **async** (`playwright.async_api`) Pla
 ### Running verification
 
 ```bash
-npm run verify:ci      # full blocking merge gate (node tests + release build + smoke + PWA + post-FX)
+npm run verify:ci      # full blocking merge gate (node tests + release build + smoke + PWA + post-FX + visual)
 npm run build          # or: npm run verify:build (release WASM + Vite)
 npm run verify         # release build + one fast Playwright smoke test (verify_juice.py)
 npm run verify:smoke   # just the smoke test, assumes dist/ already built
 npm run verify:pwa     # offline service-worker assertions, assumes dist/ already built
 npm run verify:postfx  # canvas-context + webgl post-FX + backend recovery
-npm run verify:visual  # canonical scripts + baseline pixel-diff gate (non-blocking in CI)
+npm run verify:visual  # canonical scripts + baseline pixel-diff gate (blocking in CI)
+npm run verify:visual:stability  # run each canonical script 3x; fail unless captures are identical
 npm run verify:visual:update  # refresh verification/baselines/ after intentional art changes
 npm run verify:visual:all     # run every verification/verify_*.py script, print a summary
 python3 verification/verify_game_http.py   # run any individual script directly
@@ -435,7 +471,7 @@ Visual-only particle integration (trail, dust, aura/ember) can run on a **Dedica
 - **Add a new particle type**: Add the class/type in `src/modules/Entities.js`, update the particle update/render logic in `Game.js` and `Renderer.js`. If it spawns frequently, consider adding it to the `ParticlePool` in `Game.js`.
 - **Add a new WASM function**: Write it in the appropriate `src/assembly/*.ts` file, re-export from `index.ts`, add a wrapper + JS fallback in `WasmManager.js`, add the name to `WASM_MANAGER_WASM_EXPORTS`, then call it from `Game.js` or `Entities.js`.
 - **Add a new sound**: Add a method to `SoundManager` in `src/modules/Audio.js` using oscillators and gains.
-- **Add a verification test**: Create a new `verify_*.py` file in `verification/` using the `DistServer` helper from `server.py` (see other scripts for the pattern). It is picked up by `npm run verify:visual:all`. To gate visual regressions, add the script and screenshot mapping to `visual_manifest.py`, then run `npm run verify:visual:update`.
+- **Add a verification test**: Create a new `verify_*.py` file in `verification/` using the `DistServer` helper from `server.py` and the fixed-step helpers from `fixed_step.py` (see `verify_juice.py`). It is picked up by `npm run verify:visual:all`. To gate visual regressions, add the script and screenshot mapping to `visual_manifest.py`, then run `npm run verify:visual:update` (it double-captures and refuses unstable scenes).
 
 ## Cursor Cloud specific instructions
 

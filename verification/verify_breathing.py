@@ -4,10 +4,11 @@ import sys
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from screenshot_utils import (
-    advance,
-    capture_deterministic_screenshot,
-    new_deterministic_page,
+from fixed_step import (
+    capture_fixed_step_screenshot,
+    new_fixed_step_page,
+    open_game,
+    step,
 )
 from server import CHROMIUM_ARGS, DistServer
 
@@ -16,20 +17,19 @@ def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
+            page = new_fixed_step_page(browser, viewport={"width": 1280, "height": 800})
 
             page.on("console", lambda msg: print(f"Browser console: {msg.text}"))
             page.on("pageerror", lambda msg: print(f"Browser error: {msg}"))
 
             print(f"Navigating to {server.url}")
-            page.goto(server.url)
-            page.wait_for_selector("#gameCanvas")
+            open_game(page, server.url)
 
             print("Clicking Start Button")
             page.click("#startBtn")
 
             print("Waiting for crystals to spawn and stabilize...")
-            advance(page, 2000)
+            step(page, 2000)
 
             print("Polling crystal scaleX...")
             scales = []
@@ -39,7 +39,7 @@ def run():
                 )
                 if scale is not None:
                     scales.append(scale)
-                advance(page, 100)
+                step(page, 100)
 
             print(f"Collected scales: {scales}")
 
@@ -63,11 +63,7 @@ def run():
 
             print("SUCCESS: Crystal scale is varying (Breathing effect active).")
 
-            capture_deterministic_screenshot(
-                page,
-                "verification/breathing_crystals.png",
-                timestamp=1_000_600,
-            )
+            capture_fixed_step_screenshot(page, "verification/breathing_crystals.png")
 
             browser.close()
 

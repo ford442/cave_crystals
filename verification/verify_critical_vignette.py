@@ -4,10 +4,11 @@ import sys
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
-from screenshot_utils import (
-    advance,
-    capture_deterministic_screenshot,
-    new_deterministic_page,
+from fixed_step import (
+    capture_fixed_step_screenshot,
+    new_fixed_step_page,
+    open_game,
+    step,
 )
 from server import CHROMIUM_ARGS, DistServer
 
@@ -30,26 +31,24 @@ def run():
     with DistServer() as server:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            page = new_deterministic_page(browser, viewport={"width": 1280, "height": 800})
+            page = new_fixed_step_page(browser, viewport={"width": 1280, "height": 800})
 
             page.on("console", lambda msg: print(f"Browser console: {msg.text}"))
             page.on("pageerror", lambda msg: print(f"Browser error: {msg}"))
 
             print(f"Navigating to {server.url}")
-            page.goto(server.url)
-            page.wait_for_selector("#gameCanvas")
+            open_game(page, server.url)
 
             print("Clicking Start Button")
             page.click("#startBtn")
-            advance(page, 500)
+            step(page, 500)
 
             print("Injecting Critical State...")
             page.evaluate(NORMALIZE_CRITICAL_JS)
 
-            capture_deterministic_screenshot(
-                page,
-                "verification/verify_critical_vignette.png",
-                timestamp=1_000_200,
+            # Draw the injected state as-is; a stepped frame would decay it first.
+            capture_fixed_step_screenshot(
+                page, "verification/verify_critical_vignette.png", redraw=True
             )
 
             browser.close()
