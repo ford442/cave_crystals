@@ -12,7 +12,7 @@
  * @property {string} description
  * @property {string} icon
  * @property {AchievementEvent} event
- * @property {(payload: any, stats: import('./SaveManager.js').GameStats) => boolean} check
+ * @property {(payload: any, stats: import('./types.js').GameStats) => boolean} check
  */
 
 /**

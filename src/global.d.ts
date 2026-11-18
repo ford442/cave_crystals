@@ -56,7 +56,7 @@ interface Window {
     __FORCE_CANVAS_POSTFX__?: boolean;
     __toggleDevPerf__?: (force?: boolean) => boolean;
     game?: import('./modules/Game.js').Game;
-    SoundManager?: import('./modules/Audio.js').SoundManager;
+    SoundManager?: typeof import('./modules/Audio.js').SoundManager;
     __pendingReplay__?: {
         version: number;
         seed: number;

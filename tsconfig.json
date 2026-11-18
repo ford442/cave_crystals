@@ -6,11 +6,23 @@
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
+
+    // Strictness floor for every file. `strict` stays off here because `noImplicitAny` and
+    // `strictNullChecks` still have ~1,200 violations in the engine/renderer files; those two
+    // (and the rest of `strict`) are enforced per file by tsconfig.strict.json. Flags below are
+    // the strict-family members that already pass everywhere, so they cannot regress.
     "strict": false,
-    "noImplicitAny": false,
+    "alwaysStrict": true,
+    "noImplicitThis": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    "useUnknownInCatchVariables": true,
+
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "resolveJsonModule": true,
-    "skipLibCheck": true,
+    // Off so our own .d.ts files (src/global.d.ts, build/release.d.ts) are checked. A bad type
+    // reference there silently resolves to `any`. node_modules typings currently check clean.
+    "skipLibCheck": false,
     "maxNodeModuleJsDepth": 0
   },
   "include": ["src/**/*.js", "src/global.d.ts", "build/release.d.ts"],

@@ -24,7 +24,7 @@
     "verify:visual:all": "python3 verification/run_all.py",
     "verify": "npm run verify:build && npm run verify:smoke",
     "verify:ci": "npm run test:ci && npm run build && npm run verify:smoke && npm run verify:pwa && npm run verify:postfx && npm run verify:visual",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && node scripts/typecheck-strict.mjs",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test:lint": "node --test test/lint/*.test.mjs",

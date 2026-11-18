@@ -1,9 +1,9 @@
-// @ts-nocheck
 // Reusable easing helpers for animation juice
 
 /**
  * Elastic ease out — overshoots, then settles.
- * t: normalized progress [0..1]
+ * @param {number} t normalized progress [0..1]
+ * @returns {number}
  */
 export function easeOutElastic(t) {
     if (t === 0) return 0;
@@ -16,8 +16,9 @@ export function easeOutElastic(t) {
 
 /**
  * Back ease out — overshoots slightly, then settles.
- * t: normalized progress [0..1]
- * overshoot: controls amount of overshoot (default 1.70158)
+ * @param {number} t normalized progress [0..1]
+ * @param {number} [overshoot] controls amount of overshoot (default 1.70158)
+ * @returns {number}
  */
 export function easeOutBack(t, overshoot = 1.70158) {
     const s = overshoot;        // overshoot coefficient
@@ -27,6 +28,8 @@ export function easeOutBack(t, overshoot = 1.70158) {
 
 /**
  * Cubic ease out — smooth deceleration.
+ * @param {number} t normalized progress [0..1]
+ * @returns {number}
  */
 export function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
@@ -34,6 +37,8 @@ export function easeOutCubic(t) {
 
 /**
  * Quart ease out — sharper deceleration.
+ * @param {number} t normalized progress [0..1]
+ * @returns {number}
  */
 export function easeOutQuart(t) {
     return 1 - Math.pow(1 - t, 4);

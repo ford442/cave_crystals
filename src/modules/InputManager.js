@@ -1,4 +1,4 @@
-// @ts-nocheck
+/** @import { InputPollResult, InputPollSettings, LaneDelta } from './types.js' */
 
 const LANE_LEFT = new Set(['ArrowLeft', 'KeyA']);
 const LANE_RIGHT = new Set(['ArrowRight', 'KeyD']);
@@ -43,11 +43,14 @@ export class InputManager {
     }
 
     /**
-     * @param {{ keyboard?: boolean, gamepad?: boolean }} inputSettings
-     * @param {number} dt
-     * @returns {{ laneDelta: number, fire: boolean }}
+     * Reads the enabled input sources once per frame. Key presses are edge-triggered (cleared by
+     * each poll); held keys auto-repeat. A fire request stays buffered until `consumeFire()`.
+     * @param {InputPollSettings} inputSettings
+     * @param {number} dt Frame time in ms.
+     * @returns {InputPollResult}
      */
     poll(inputSettings, dt) {
+        /** @type {LaneDelta} */
         let laneDelta = 0;
 
         if (inputSettings.keyboard !== false) {

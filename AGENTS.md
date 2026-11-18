@@ -82,11 +82,13 @@ Production build (compiles release WASM only, then Vite bundles to `dist/`):
 npm run build
 ```
 
-Type-check JavaScript sources (`checkJs` via `tsconfig.json`):
+Type-check JavaScript sources (`checkJs`). This runs two passes: `tsc --noEmit` against `tsconfig.json` (the floor for every file), then `scripts/typecheck-strict.mjs` against `tsconfig.strict.json` (full `strict`, enforced per file as a ratchet):
 
 ```bash
 npm run typecheck
 ```
+
+There are no `@ts-nocheck` opt-outs under `src/`; don't add one. `tsconfig.strict.json` makes every file under `src/` strict-clean (`noImplicitAny`, `strictNullChecks`, …) **except** the legacy files listed in its `legacyStrictErrors` ceilings. New files are strict by default. A legacy file may not exceed its ceiling, and when you fix errors in one you must lower its number (delete the entry at 0); the check fails in both directions so gains stick. To see a file's strict errors: `npx tsc -p tsconfig.strict.json --pretty false | grep <file>`.
 
 Preview production build locally:
 
@@ -145,6 +147,7 @@ See `docs/WASM.md` for what belongs in WASM vs JavaScript.
 - **WASM integration**: `wasmBridge.js` lazy-loads ASC-generated `build/release.js` bindings; `WasmManager.js` wraps every export with a JavaScript fallback. If WASM fails to load or a call throws, the game continues using the JS implementation.
 - **Audio**: `SoundManager` is a plain object (not a class) with methods like `shoot()`, `match()`, `mismatch()`. It lazily initializes an `AudioContext` on first user interaction.
 - **Colors**: Defined in `Constants.js` as an array of 5 colors with `name`, `hex`, and `glow` properties.
+- **Types**: Shared JSDoc contracts live in `src/modules/types.js`; pull them in with `/** @import { GameSettings } from './types.js' */` rather than redefining a shape. Persisted data has a validated type and a raw one: `GameSettings`/`SaveData`/`GameStats` are what the game uses, and `RawGameSettings`/`RawSaveData` are what `normalizeSettings`/`normalizeSave` accept from localStorage, old saves or DOM controls. Other contracts: `InputPollResult` (what `InputManager#poll` and `ReplayPlayer#poll` return), `TutorialStep`, and the audio set (`AudioSettingsData`, `AudioSessionState`, `AudioBuses`, `AudioChannel`). `src/global.d.ts` is type-checked, so a bad type reference there fails the build instead of quietly becoming `any`.
 
 ## WASM Development Notes
 

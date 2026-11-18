@@ -1,9 +1,10 @@
-// @ts-nocheck
-
-/** @typedef {'idle' | 'aim' | 'match' | 'mismatch' | 'hints' | 'complete'} TutorialStep */
+/** @import { Game } from './Game.js' */
+/** @import { SaveManager } from './SaveManager.js' */
+/** @import { TutorialCopyKey, TutorialStep } from './types.js' */
 
 const HINTS_DURATION_MS = 60_000;
 
+/** @type {Record<TutorialCopyKey, string>} */
 const STEP_COPY = {
     aim: 'Move your cursor (or tap a lane) to aim the launcher.',
     aimKeyboard: 'Move your cursor, tap a lane, or use arrow keys to aim the launcher.',
@@ -16,8 +17,8 @@ const STEP_COPY = {
 
 export class TutorialManager {
     /**
-     * @param {import('./Game.js').Game} game
-     * @param {import('./SaveManager.js').SaveManager} saveManager
+     * @param {Game} game
+     * @param {SaveManager} saveManager
      */
     constructor(game, saveManager) {
         this.game = game;
@@ -230,8 +231,9 @@ export class TutorialManager {
             return;
         }
 
-        const copy = STEP_COPY[this.step];
-        if (copy) this.textEl.textContent = copy;
+        // `idle` and `complete` have no copy; leave the text alone.
+        if (this.step === 'idle' || this.step === 'complete') return;
+        this.textEl.textContent = STEP_COPY[this.step];
     }
 
     _persistDismissal() {

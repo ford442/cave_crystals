@@ -1,8 +1,8 @@
-// @ts-nocheck
+/** @import { AudioResumable } from '../types.js' */
 
 /**
  * Wire browser lifecycle events so AudioContext resumes after tab switches / interruptions.
- * @param {{ resume: () => void | Promise<void> }} manager
+ * @param {AudioResumable} manager
  */
 export function bindAudioLifecycle(manager) {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -11,10 +11,7 @@ export function bindAudioLifecycle(manager) {
 
     const resume = () => {
         try {
-            const result = manager.resume();
-            if (result && typeof result.then === 'function') {
-                result.catch(() => { /* browser may reject without gesture */ });
-            }
+            manager.resume()?.catch(() => { /* browser may reject without gesture */ });
         } catch {
             // Ignore resume failures until the next user gesture.
         }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import bgImage from '../assets/background.png';
 
 export class Background {
@@ -20,6 +19,7 @@ export class Background {
 
         // Append to container, behind game canvas
         const container = document.getElementById('gameContainer');
+        if (!container) throw new Error('Background: #gameContainer not found');
 
         // Ensure container is relative so absolute positioning works if not already
         // (Checking existing CSS might be good, but adding this ensures safety)
