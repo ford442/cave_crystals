@@ -592,6 +592,77 @@ export class HudEffectsRenderer {
         this.host.ctx.globalAlpha = prevAlpha;
     }
 
+    /**
+     * Lane hazards: tinted bands with rising chevrons for overgrowth lanes, and pulsing
+     * lane fills with a fill bar while a tremor / color shift is telegraphed.
+     * @param {import('../types.js').GameState} gameState
+     * @param {number} timestamp
+     */
+    drawLaneHazards(gameState, timestamp) {
+        const hz = gameState.hazards;
+        if (!hz) return;
+        const ctx = this.host.ctx;
+        const laneW = this.host.laneWidth;
+        const h = this.host.height;
+        ctx.save();
+
+        for (const { lane, multiplier } of hz.overgrowth) {
+            const x = lane * laneW;
+            const strength = Math.min(1, Math.abs(multiplier - 1));
+            const fast = multiplier > 1;
+            const tint = fast ? '124, 255, 107' : '136, 221, 255';
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = `rgba(${tint}, ${0.035 + strength * 0.04})`;
+            ctx.fillRect(x, 0, laneW, h);
+            // Chevrons crawl toward the middle (where crystals meet) on overgrown lanes.
+            const cx = x + laneW / 2;
+            const spacing = 46;
+            const drift = (timestamp * 0.03) % spacing;
+            ctx.strokeStyle = `rgba(${tint}, ${0.12 + strength * 0.12})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let y = drift; y < h / 2 - 20; y += spacing) {
+                const dir = fast ? 1 : -1;
+                ctx.moveTo(cx - 8, y - 5 * dir);
+                ctx.lineTo(cx, y + 5 * dir);
+                ctx.lineTo(cx + 8, y - 5 * dir);
+                const yb = h - y;
+                ctx.moveTo(cx - 8, yb + 5 * dir);
+                ctx.lineTo(cx, yb - 5 * dir);
+                ctx.lineTo(cx + 8, yb + 5 * dir);
+            }
+            ctx.stroke();
+        }
+
+        for (const warning of hz.warnings) {
+            const color = warning.kind === 'tremor' ? '255, 136, 68' : '255, 119, 225';
+            const pulse = 0.5 + 0.5 * Math.sin(timestamp / (90 - warning.progress * 50));
+            for (const lane of warning.lanes) {
+                const x = lane * laneW;
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = `rgba(${color}, ${0.06 + pulse * 0.1 * (0.5 + warning.progress)})`;
+                ctx.fillRect(x, 0, laneW, h);
+                ctx.strokeStyle = `rgba(${color}, ${0.4 + pulse * 0.4})`;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x + 3, 3, laneW - 6, h - 6);
+                // Fill bar across the lane centre
+                const barW = laneW * 0.6;
+                const bx = x + (laneW - barW) / 2;
+                const by = h / 2 - 3;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(bx, by, barW, 6);
+                ctx.fillStyle = `rgba(${color}, 0.95)`;
+                ctx.fillRect(bx, by, barW * warning.progress, 6);
+                ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(warning.kind === 'tremor' ? '!' : '◆', x + laneW / 2, by - 6);
+            }
+        }
+
+        ctx.restore();
+    }
+
     drawDevMetricsOverlay(gameState, profile) {
         const m = gameState.perfMetrics;
         const overrides = gameState.adaptiveOverrides;

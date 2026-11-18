@@ -148,8 +148,7 @@ def run():
             print(f"Page errors: {page_errors}")
             assert page_errors == []
 
-            path = capture_deterministic_screenshot(page, "verification/verify_boss_encounter.png")
-            report_screenshot(path)
+            capture_deterministic_screenshot(page, "verification/verify_boss_encounter.png")
             browser.close()
 
 

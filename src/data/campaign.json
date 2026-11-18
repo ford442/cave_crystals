@@ -1,0 +1,149 @@
+{
+  "endless": {
+    "lanes": 7,
+    "colorCount": 5,
+    "crystalHeight": { "min": 20, "max": 60 },
+    "growth": { "baseMultiplier": 1.0, "scoreDivisor": 500 }
+  },
+  "arcs": [
+    {
+      "id": "awakening",
+      "name": "The Awakening",
+      "subtitle": "Arc I",
+      "color": "#FFD700",
+      "levels": [
+        {
+          "id": 1,
+          "name": "Crystal Awakening",
+          "lanes": 5,
+          "colorCount": 3,
+          "crystalHeight": { "min": 20, "max": 50 },
+          "growth": { "baseMultiplier": 0.75, "scoreDivisor": 1000 },
+          "objective": { "type": "score", "target": 300 },
+          "description": "Score 300 points"
+        },
+        {
+          "id": 2,
+          "name": "Narrow Passage",
+          "lanes": 4,
+          "colorCount": 3,
+          "crystalHeight": { "min": 30, "max": 70 },
+          "growth": { "baseMultiplier": 0.9, "scoreDivisor": 900 },
+          "objective": { "type": "survival", "target": 45 },
+          "description": "Survive 45 seconds"
+        },
+        {
+          "id": 3,
+          "name": "Perfect Harmony",
+          "lanes": 6,
+          "colorCount": 4,
+          "crystalHeight": { "min": 25, "max": 60 },
+          "growth": { "baseMultiplier": 1.0, "scoreDivisor": 700 },
+          "objective": { "type": "streak", "target": 8 },
+          "description": "Hit an 8-match streak"
+        },
+        {
+          "id": 4,
+          "name": "Deep Clearance",
+          "lanes": 6,
+          "colorCount": 4,
+          "crystalHeight": { "min": 50, "max": 90 },
+          "growth": { "baseMultiplier": 1.1, "scoreDivisor": 600 },
+          "objective": { "type": "clearance", "target": 35 },
+          "description": "Shrink all crystals below 35px"
+        },
+        {
+          "id": 5,
+          "name": "The Convergence",
+          "lanes": 7,
+          "colorCount": 5,
+          "crystalHeight": { "min": 40, "max": 70 },
+          "growth": { "baseMultiplier": 1.25, "scoreDivisor": 450 },
+          "objective": { "type": "score", "target": 800 },
+          "description": "Defeat The Convergence",
+          "bossId": "convergence"
+        }
+      ]
+    },
+    {
+      "id": "fracture",
+      "name": "The Fracture",
+      "subtitle": "Arc II",
+      "color": "#B388FF",
+      "levels": [
+        {
+          "id": 6,
+          "name": "Fault Lines",
+          "lanes": 6,
+          "colorCount": 4,
+          "crystalHeight": { "min": 25, "max": 55 },
+          "growth": { "baseMultiplier": 1.0, "scoreDivisor": 800 },
+          "objective": { "type": "score", "target": 450 },
+          "description": "Score 450 points — the edge lanes overgrow",
+          "hazards": [
+            { "kind": "overgrowth", "lanes": [0, 5], "growthMultiplier": 1.6 }
+          ],
+          "powerUpPool": ["rainbow", "freeze", "lane_shockwave", "temporal_drift"]
+        },
+        {
+          "id": 7,
+          "name": "Tremor Gallery",
+          "lanes": 7,
+          "colorCount": 4,
+          "crystalHeight": { "min": 25, "max": 55 },
+          "growth": { "baseMultiplier": 0.95, "scoreDivisor": 800 },
+          "objective": { "type": "survival", "target": 50 },
+          "description": "Survive 50 seconds of quakes",
+          "hazards": [
+            { "kind": "tremor", "intervalMs": 7000, "warningMs": 1600, "growth": 32, "laneCount": 1 }
+          ],
+          "powerUpPool": ["rainbow", "freeze", "lane_shockwave", "fault_quake"]
+        },
+        {
+          "id": 8,
+          "name": "Shifting Prisms",
+          "lanes": 6,
+          "colorCount": 5,
+          "crystalHeight": { "min": 25, "max": 60 },
+          "growth": { "baseMultiplier": 1.0, "scoreDivisor": 700 },
+          "objective": { "type": "streak", "target": 10 },
+          "description": "Hit a 10-match streak while colors shift",
+          "hazards": [
+            { "kind": "color_shift", "intervalMs": 6000, "warningMs": 1200, "laneCount": 2 }
+          ],
+          "powerUpPool": ["rainbow", "freeze", "lane_shockwave", "prism_volley"]
+        },
+        {
+          "id": 9,
+          "name": "Crushing Depths",
+          "lanes": 7,
+          "colorCount": 5,
+          "crystalHeight": { "min": 50, "max": 85 },
+          "growth": { "baseMultiplier": 1.1, "scoreDivisor": 650 },
+          "objective": { "type": "clearance", "target": 40 },
+          "description": "Shrink all crystals below 40px",
+          "hazards": [
+            { "kind": "overgrowth", "lanes": [3], "growthMultiplier": 1.5 },
+            { "kind": "tremor", "intervalMs": 9000, "warningMs": 1800, "growth": 26, "laneCount": 2 }
+          ],
+          "powerUpPool": ["rainbow", "freeze", "lane_shockwave", "temporal_drift", "fault_quake"]
+        },
+        {
+          "id": 10,
+          "name": "The Fractured Heart",
+          "lanes": 7,
+          "colorCount": 5,
+          "crystalHeight": { "min": 40, "max": 70 },
+          "growth": { "baseMultiplier": 1.3, "scoreDivisor": 450 },
+          "objective": { "type": "score", "target": 1000 },
+          "description": "Defeat The Fractured Heart",
+          "bossId": "fractured_heart",
+          "hazards": [
+            { "kind": "tremor", "intervalMs": 8000, "warningMs": 1500, "growth": 18, "laneCount": 1 }
+          ],
+          "powerUpPool": ["rainbow", "freeze", "lane_shockwave", "temporal_drift", "prism_volley", "fault_quake"]
+        }
+      ]
+    }
+  ]
+}

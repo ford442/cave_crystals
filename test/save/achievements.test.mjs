@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 
 import { ACHIEVEMENTS, ACHIEVEMENTS_BY_ID, getAchievementsForEvent } from '../../src/modules/AchievementDefinitions.js';
+import { CONTENT } from '../../src/modules/content/ContentRegistry.js';
 import {
     SaveManager,
     STORAGE_KEY,
@@ -66,6 +67,18 @@ describe('AchievementDefinitions', () => {
         assert.equal(def.check({ bossId: 'convergence' }, DEFAULT_STATS), true);
         assert.equal(def.check({ bossId: 'other-boss' }, DEFAULT_STATS), false);
         assert.equal(def.check({ bossId: undefined }, DEFAULT_STATS), false);
+    });
+
+    it('boss achievements reference bosses that exist in content', () => {
+        const heart = ACHIEVEMENTS_BY_ID.get('boss_fractured_heart');
+        assert.equal(heart.check({ bossId: 'fractured_heart' }, DEFAULT_STATS), true);
+        assert.equal(heart.check({ bossId: 'convergence' }, DEFAULT_STATS), false);
+        for (const boss of CONTENT.bosses) {
+            assert.ok(
+                ACHIEVEMENTS.some(a => a.event === 'boss_defeat' && a.check({ bossId: boss.id }, DEFAULT_STATS)),
+                `boss "${boss.id}" should have a defeat achievement`
+            );
+        }
     });
 
     it('perfect_level requires a non-endless level with zero mismatches', () => {

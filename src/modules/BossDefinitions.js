@@ -1,13 +1,13 @@
 // @ts-check
 /** @import { BossDefinition, BossPhaseDefinition } from './types.js' */
 
-import bossesData from '../data/bosses.json' with { type: 'json' };
+import { CONTENT } from './content/ContentRegistry.js';
 
 /**
  * @returns {BossDefinition[]}
  */
 export function getAllBosses() {
-    return /** @type {BossDefinition[]} */ (bossesData.bosses || []);
+    return /** @type {BossDefinition[]} */ (CONTENT.bosses);
 }
 
 /**
@@ -16,7 +16,7 @@ export function getAllBosses() {
  */
 export function getBossById(id) {
     if (!id) return null;
-    return getAllBosses().find((b) => b.id === id) || null;
+    return CONTENT.bossesById.get(id) || null;
 }
 
 /**

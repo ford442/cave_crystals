@@ -22,14 +22,14 @@ Each entry in the `bosses` array:
 | `colorLockAlternating` | boolean | Lock lane colors to an alternating pattern |
 | `phases[]` | array | Combat phases (see below) |
 | `rewards.scoreBonus` | number | Score granted on defeat |
-| `rewards.rainbowCount` | number | Rainbow power-ups granted on defeat |
+| `rewards.powerUps` | object | Power-up id → count granted on defeat (ids must exist in `powerups.json`) |
 
 ### Phase object
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Phase label for debugging |
-| `formationPhase` | number | Pattern index for WASM `generateBossHeights` / `getBossVulnerableMask` (`0` center peak, `1` alternating ridges, `2` edge peaks) |
+| `formationPhase` | number | Pattern index (0–15) for WASM `generateBossHeights` / `getBossVulnerableMask`: `0` center peak, `1` alternating ridges, `2` edge peaks; `3`+ seeded sine waves with **every** lane vulnerable |
 | `telegraphMs` | number | Wind-up before the growth surge |
 | `surgeMs` | number | Simultaneous growth pulse duration |
 | `vulnerableMs` | number | Window where matching vulnerable lanes deals boss damage |
@@ -38,15 +38,14 @@ Each entry in the `bosses` array:
 
 ### Wiring a level
 
-Set `bossId` on a campaign level in `LevelDefinitions.js`:
+Set `bossId` on a campaign level in `src/data/campaign.json` and point the boss's `triggerLevelId` at that level's `id`. Content validation rejects either link if it doesn't match the other (see [CONTENT.md](CONTENT.md)):
 
-```js
+```json
 {
-  id: 5,
-  name: 'The Convergence',
-  // ...
-  bossId: 'convergence',
-  description: 'Defeat The Convergence',
+  "id": 5,
+  "name": "The Convergence",
+  "bossId": "convergence",
+  "description": "Defeat The Convergence"
 }
 ```
 
@@ -83,5 +82,7 @@ JS mirrors live in `WasmFallbacks.js`. `WasmManager.generateBossHeights` returns
 npm run build
 python3 verification/verify_boss_encounter.py
 ```
+
+Shipped bosses: `convergence` (Arc I finale, level 5) and `fractured_heart` (Arc II finale, level 10, five phases, with a tremor hazard running during the fight). `forceStartBoss(id)` jumps to whichever level declares that boss.
 
 The script calls `window.game.forceStartBoss('convergence')`, advances through intro → vulnerable, deals scripted damage, and asserts defeat + reward flow.

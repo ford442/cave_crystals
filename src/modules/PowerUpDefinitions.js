@@ -1,11 +1,16 @@
+// @ts-check
 /** @import { PowerUpDefinition, PowerUpActivation } from './types.js' */
 
-/** @type {Readonly<Record<'RAINBOW' | 'FREEZE' | 'LANE_SHOCKWAVE', string>>} */
-export const POWER_UP_TYPES = {
-    RAINBOW: 'rainbow',
-    FREEZE: 'freeze',
-    LANE_SHOCKWAVE: 'lane_shockwave',
-};
+import { CONTENT } from './content/ContentRegistry.js';
+
+/**
+ * Upper-snake alias for every catalog id (`POWER_UP_TYPES.LANE_SHOCKWAVE === 'lane_shockwave'`),
+ * derived from `src/data/powerups.json`.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const POWER_UP_TYPES = Object.freeze(Object.fromEntries(
+    CONTENT.powerUps.map(def => [def.id.toUpperCase(), def.id])
+));
 
 /** @type {Readonly<Record<'ON_SHOOT' | 'ON_ACTIVATE' | 'ON_PICKUP', PowerUpActivation>>} */
 export const ACTIVATION_MODES = {
@@ -15,48 +20,18 @@ export const ACTIVATION_MODES = {
 };
 
 /**
- * Data-driven power-up catalog. Effect behavior is implemented in PowerUpEffects.js.
- * @type {Record<string, PowerUpDefinition>}
+ * Data-driven power-up catalog keyed by id, in authored order. Effect behaviour is chosen
+ * by `effect.kind` (see PowerUpManager / validateContent.POWER_UP_EFFECT_KINDS).
+ * @type {Readonly<Record<string, PowerUpDefinition>>}
  */
-export const POWER_UPS = {
-    [POWER_UP_TYPES.RAINBOW]: {
-        id: POWER_UP_TYPES.RAINBOW,
-        name: 'Rainbow Spore',
-        activation: ACTIVATION_MODES.ON_SHOOT,
-        durationMs: null,
-        rarity: 0.09,
-        color: '#ffffff',
-        hudLabel: 'RAINBOW',
-        icon: '◈',
-        description: 'Next shot matches any color',
-    },
-    [POWER_UP_TYPES.FREEZE]: {
-        id: POWER_UP_TYPES.FREEZE,
-        name: 'Crystal Freeze',
-        activation: ACTIVATION_MODES.ON_PICKUP,
-        durationMs: 5000,
-        rarity: 0.07,
-        color: '#88ddff',
-        hudLabel: 'FREEZE',
-        icon: '❄',
-        description: 'Stop crystal growth for 5s',
-    },
-    [POWER_UP_TYPES.LANE_SHOCKWAVE]: {
-        id: POWER_UP_TYPES.LANE_SHOCKWAVE,
-        name: 'Lane Shockwave',
-        activation: ACTIVATION_MODES.ON_ACTIVATE,
-        durationMs: null,
-        rarity: 0.06,
-        color: '#ffaa00',
-        hudLabel: 'SHOCK',
-        icon: '⚡',
-        description: 'Shrink crystals in your lane (E / tap USE)',
-        activateKey: 'KeyE',
-    },
-};
+export const POWER_UPS = Object.freeze(Object.fromEntries(CONTENT.powerUps.map(def => [def.id, def])));
+
+/** Drop pool used when a level does not declare `powerUpPool` (and in endless mode). */
+/** @type {readonly string[]} */
+export const DEFAULT_POWER_UP_POOL = CONTENT.defaultPowerUpPool;
 
 /** Minimum combo before power-up drops can roll. */
-export const POWER_UP_MIN_COMBO = 3;
+export const POWER_UP_MIN_COMBO = CONTENT.drops.minCombo;
 
 /** Base chance added per combo point above minimum. */
-export const POWER_UP_COMBO_BONUS = 0.015;
+export const POWER_UP_COMBO_BONUS = CONTENT.drops.comboBonus;

@@ -430,6 +430,7 @@
  * @property {InstanceType<typeof import('./Entities.js').EnergyRing>[]} energyRings
  * @property {EnvParticle[]} envParticles
  * @property {BossHudState | null} [boss]
+ * @property {import('./HazardController.js').HazardRenderState | null} [hazards]
  */
 
 /**
@@ -454,7 +455,7 @@
 /**
  * @typedef {Object} BossRewards
  * @property {number} [scoreBonus]
- * @property {number} [rainbowCount]
+ * @property {Record<string, number>} [powerUps] Power-up id → count granted on defeat.
  */
 
 /**
@@ -642,6 +643,18 @@
  * @property {string} icon
  * @property {string} description
  * @property {string} [activateKey]
+ * @property {string} [activateText]
+ * @property {PowerUpEffect} effect
+ */
+
+/**
+ * @typedef {Object} PowerUpEffect
+ * @property {'rainbow_shot' | 'growth_scale' | 'lane_shockwave'} kind
+ * @property {number} [charges]    rainbow_shot: shots granted per pickup.
+ * @property {number} [scale]      growth_scale: growth multiplier while active (0 = frozen).
+ * @property {number} [shrink]     lane_shockwave: px removed from each crystal.
+ * @property {number} [minHeight]  lane_shockwave: floor height.
+ * @property {number} [radius]     lane_shockwave: neighbouring lanes hit on each side.
  */
 
 /**
@@ -696,6 +709,28 @@
  * @property {LevelObjective} objective
  * @property {string} description
  * @property {string} [bossId]
+ * @property {LevelHazard[]} [hazards]
+ * @property {string[]} [powerUpPool] Power-up ids that can drop; defaults to the catalog's defaultPool.
+ */
+
+/**
+ * @typedef {Object} LevelHazard
+ * @property {'overgrowth' | 'tremor' | 'color_shift'} kind
+ * @property {number[]} [lanes]            overgrowth: affected lanes; tremor/color_shift: candidate lanes.
+ * @property {number} [growthMultiplier]   overgrowth
+ * @property {number} [intervalMs]         tremor/color_shift
+ * @property {number} [warningMs]          tremor/color_shift: telegraph before it fires.
+ * @property {number} [growth]             tremor: px added instantly.
+ * @property {number} [laneCount]          tremor/color_shift: lanes picked per event.
+ */
+
+/**
+ * @typedef {Object} CampaignArc
+ * @property {string} id
+ * @property {string} name
+ * @property {string} [subtitle]
+ * @property {string} [color]
+ * @property {LevelDefinition[]} levels
  */
 
 /**

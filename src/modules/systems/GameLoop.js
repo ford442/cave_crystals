@@ -61,7 +61,7 @@ export class GameLoop {
         );
         const currentGrowth = getEffectiveGrowthRate(
             baseGrowth * timeScale,
-            game.powerUps.isGrowthFrozen()
+            game.powerUps.getGrowthScale()
         );
 
         game.progression.tick(dt, timeScale);
@@ -102,6 +102,14 @@ export class GameLoop {
         } else {
             game.state.boss = null;
         }
+
+        if (!game.progression.transitioning) {
+            const hazardEvents = game.hazards.update(dt, timeScale, game.state.crystals, {
+                maxHeight: game.renderer.height * 0.48,
+            });
+            for (let i = 0; i < hazardEvents.length; i++) game.onHazardEvent(hazardEvents[i]);
+        }
+        game.state.hazards = game.hazards.getRenderState();
 
         if (!bossActive && !game.progression.transitioning && !game.progression.isEndless()) {
             if (game.progression.checkObjectiveComplete(
@@ -148,8 +156,9 @@ export class GameLoop {
                 }
             });
         } else {
+            const hazards = game.hazards;
             game.state.crystals.forEach(c => {
-                c.update(currentGrowth, timeScale);
+                c.update(currentGrowth * hazards.getLaneGrowthMultiplier(c.lane), timeScale);
 
                 c.shakeX = 0;
                 c.shakeY = 0;
@@ -570,7 +579,7 @@ export class GameLoop {
 
         const palette = game.state.colorPalette || DEFAULT_PALETTE;
         const nextCol = palette[game.state.nextSporeColorIdx];
-        const hasRainbow = game.powerUps.getHeldCount('rainbow') > 0;
+        const hasRainbow = game.powerUps.hasShotModifierHeld();
         if (hasRainbow) {
             game.ui.preview.style.clipPath = '';
             game.ui.preview.style.background = 'linear-gradient(135deg, #ff0055, #00ff66, #00ccff, #cc00ff, #ffaa00)';

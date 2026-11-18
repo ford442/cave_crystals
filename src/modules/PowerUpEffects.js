@@ -30,11 +30,12 @@ export function resolveCollisionResult(collision, modifiers = {}) {
 
 /**
  * @param {number} baseGrowthRate
- * @param {boolean} frozen
+ * @param {boolean | number} frozenOrScale `true` freezes; a number is a growth multiplier (0 = frozen).
  * @returns {number}
  */
-export function getEffectiveGrowthRate(baseGrowthRate, frozen) {
-    return frozen ? 0 : baseGrowthRate;
+export function getEffectiveGrowthRate(baseGrowthRate, frozenOrScale) {
+    if (typeof frozenOrScale === 'number') return baseGrowthRate * Math.max(0, frozenOrScale);
+    return frozenOrScale ? 0 : baseGrowthRate;
 }
 
 /**

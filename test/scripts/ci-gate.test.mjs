@@ -36,6 +36,7 @@ describe('merge gate', () => {
         'npm run typecheck',
         'npm run test:lint',
         'npm run test:unit',
+        'npm run test:content',
         'npm run test:powerups',
         'npm run test:audio',
         'npm run test:game',
