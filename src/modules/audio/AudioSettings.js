@@ -1,6 +1,4 @@
-// @ts-nocheck
-
-/** @typedef {{ master: number, music: number, sfx: number, ui: number, muted: boolean, reducedIntensity: boolean }} AudioSettingsData */
+/** @import { AudioBuses, AudioSettingsData } from '../types.js' */
 
 /** @type {AudioSettingsData} */
 export const DEFAULT_AUDIO_SETTINGS = {
@@ -38,7 +36,6 @@ export function normalizeSettings(raw = {}) {
 }
 
 /**
- * @typedef {{ masterGain: GainNode, musicGain: GainNode, sfxGain: GainNode, uiGain: GainNode }} AudioBuses
  * @param {AudioBuses} buses
  * @param {AudioSettingsData} settings
  * @param {{ musicDuck?: number }} [options]

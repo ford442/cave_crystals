@@ -1,4 +1,4 @@
-// @ts-nocheck
+/** @import { AudioChannel, AudioSessionState, AudioSettingsData } from './types.js' */
 import { AmbientMusic } from './audio/AmbientMusic.js';
 import { bindAudioLifecycle } from './audio/AudioLifecycle.js';
 import { loadPersistedAudioSettings, persistAudioSettings } from './audio/AudioPersistence.js';
@@ -10,10 +10,18 @@ import {
 
 // --- AUDIO SYSTEM (WEB AUDIO API) ---
 export const SoundManager = {
+    /**
+     * Created lazily by `init()` (browsers require a user gesture first); null until then.
+     * @type {AudioContext | null}
+     */
     ctx: null,
+    /** @type {GainNode | null} */
     masterGain: null,
+    /** @type {GainNode | null} */
     sfxGain: null,
+    /** @type {GainNode | null} */
     musicGain: null,
+    /** @type {GainNode | null} */
     uiGain: null,
     ambient: new AmbientMusic(),
     settings: normalizeSettings(),
@@ -22,12 +30,12 @@ export const SoundManager = {
     _musicDuck: 1,
     _sessionActive: false,
     _lifecycleBound: false,
-    /** @type {((audio: import('./audio/AudioSettings.js').AudioSettingsData) => void) | null} */
+    /** @type {((audio: AudioSettingsData) => void) | null} */
     _persistHook: null,
 
     /**
      * Register a callback invoked when volume/mute changes are persisted (e.g. sync SaveManager).
-     * @param {(audio: import('./audio/AudioSettings.js').AudioSettingsData) => void} hook
+     * @param {(audio: AudioSettingsData) => void} hook
      */
     onPersist(hook) {
         this._persistHook = hook;
@@ -35,20 +43,29 @@ export const SoundManager = {
 
     /**
      * Initialize the audio graph and restore persisted volume/mute preferences.
-     * @param {import('./audio/AudioSettings.js').AudioSettingsData} [audioSettings]
+     * @param {AudioSettingsData} [audioSettings]
      */
     init(audioSettings) {
-        if (!this.ctx) {
-            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-            this.masterGain = this.ctx.createGain();
-            this.sfxGain = this.ctx.createGain();
-            this.musicGain = this.ctx.createGain();
-            this.uiGain = this.ctx.createGain();
+        // Without Web Audio the graph is never built and every sound method stays a silent no-op
+        // (they all guard on `ctx`), but the settings below are still restored.
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!this.ctx && AudioContextCtor) {
+            const ctx = new AudioContextCtor();
+            const masterGain = ctx.createGain();
+            const sfxGain = ctx.createGain();
+            const musicGain = ctx.createGain();
+            const uiGain = ctx.createGain();
 
-            this.sfxGain.connect(this.masterGain);
-            this.musicGain.connect(this.masterGain);
-            this.uiGain.connect(this.masterGain);
-            this.masterGain.connect(this.ctx.destination);
+            sfxGain.connect(masterGain);
+            musicGain.connect(masterGain);
+            uiGain.connect(masterGain);
+            masterGain.connect(ctx.destination);
+
+            this.ctx = ctx;
+            this.masterGain = masterGain;
+            this.sfxGain = sfxGain;
+            this.musicGain = musicGain;
+            this.uiGain = uiGain;
 
             this._bindLifecycle();
         }
@@ -66,7 +83,7 @@ export const SoundManager = {
 
     /**
      * Resume the AudioContext after browser suspension (tab switch, interruption).
-     * @returns {Promise<void> | void}
+     * @returns {Promise<void> | undefined} Undefined when there is nothing to resume.
      */
     resume() {
         if (!this.ctx || this.ctx.state === 'closed') return;
@@ -114,7 +131,7 @@ export const SoundManager = {
 
     /**
      * Channel bus for routing synthesized audio (future per-channel mixer can replace these nodes).
-     * @param {'master' | 'music' | 'sfx' | 'ui'} channel
+     * @param {AudioChannel} channel
      * @returns {GainNode | null}
      */
     getChannelBus(channel) {
@@ -133,7 +150,7 @@ export const SoundManager = {
     },
 
     /**
-     * @param {import('./audio/AudioSettings.js').AudioSettingsData} audioSettings
+     * @param {AudioSettingsData} audioSettings
      * @param {{ persist?: boolean }} [options]
      */
     applySettings(audioSettings, options = {}) {
@@ -146,19 +163,20 @@ export const SoundManager = {
     },
 
     _applySettings() {
-        if (!this.masterGain) return;
+        // The four buses are created together in init(), so one missing means none exist yet.
+        const { masterGain, musicGain, sfxGain, uiGain } = this;
+        if (!masterGain || !musicGain || !sfxGain || !uiGain) return;
         applyToBuses(
-            {
-                masterGain: this.masterGain,
-                musicGain: this.musicGain,
-                sfxGain: this.sfxGain,
-                uiGain: this.uiGain,
-            },
+            { masterGain, musicGain, sfxGain, uiGain },
             this.settings,
             { musicDuck: this._musicDuck }
         );
     },
 
+    /**
+     * Scale the music bus (1 = full, <1 = ducked under gameplay stings).
+     * @param {number} duck
+     */
     setMusicDuck(duck) {
         this._musicDuck = duck;
         this._applySettings();
@@ -170,11 +188,13 @@ export const SoundManager = {
             this.ambient.dispose();
         }
         this._sessionActive = true;
-        this.ambient.start(this.ctx, this.musicGain, this.settings.reducedIntensity);
+        const { ctx, musicGain } = this;
+        if (!ctx || !musicGain) return;
+        this.ambient.start(ctx, musicGain, this.settings.reducedIntensity);
     },
 
     /**
-     * @param {{ active?: boolean, criticalIntensity?: number, combo?: number, level?: number }} state
+     * @param {AudioSessionState} state
      */
     updateSession(state) {
         if (!this._sessionActive) return;
@@ -189,6 +209,10 @@ export const SoundManager = {
         this.ambient.fadeOutAndStop(0.8);
     },
 
+    /**
+     * @param {number} vol
+     * @returns {number}
+     */
     _intensityVol(vol) {
         return vol * getIntensityMultiplier(this.settings);
     },
@@ -216,7 +240,7 @@ export const SoundManager = {
      * @param {number} duration
      * @param {number} [vol]
      * @param {number} [delaySec]
-     * @param {GainNode} [bus]
+     * @param {GainNode | null} [bus] Defaults to the SFX bus.
      */
     scheduleTone(freq, type, duration, vol = 0.1, delaySec = 0, bus = null) {
         if (!this.ctx || !this.sfxGain) return;
@@ -240,6 +264,12 @@ export const SoundManager = {
         osc.stop(t0 + duration);
     },
 
+    /**
+     * @param {number} freq
+     * @param {OscillatorType} type
+     * @param {number} duration
+     * @param {number} [vol]
+     */
     playTone(freq, type, duration, vol = 0.1) {
         this.scheduleTone(freq, type, duration, vol, 0, this.sfxGain);
     },
@@ -363,12 +393,13 @@ export const SoundManager = {
 
     /** Boss intro / telegraph sting — low brass-like stack with a rising edge. */
     bossSting() {
-        if (!this.ctx || !this.uiGain) return;
-        const t0 = this.ctx.currentTime;
+        const { ctx, uiGain } = this;
+        if (!ctx || !uiGain) return;
+        const t0 = ctx.currentTime;
         const freqs = [110, 165, 220, 330];
         freqs.forEach((freq, i) => {
-            const osc = this.ctx.createOscillator();
-            const gain = this.ctx.createGain();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
             const vol = this._intensityVol(0.22 - i * 0.03);
             osc.type = i < 2 ? 'sawtooth' : 'triangle';
             osc.frequency.setValueAtTime(freq, t0);
@@ -377,8 +408,8 @@ export const SoundManager = {
             gain.gain.exponentialRampToValueAtTime(Math.max(0.01, vol), t0 + 0.05);
             gain.gain.exponentialRampToValueAtTime(0.01, t0 + 0.7);
             osc.connect(gain);
-            gain.connect(this.uiGain);
-            this._trackVoice(this.uiGain, osc, gain);
+            gain.connect(uiGain);
+            this._trackVoice(uiGain, osc, gain);
             osc.start(t0);
             osc.stop(t0 + 0.75);
         });

@@ -1,48 +1,9 @@
-// @ts-nocheck
 import { normalizeSettings as normalizeAudio, DEFAULT_AUDIO_SETTINGS } from './audio/AudioSettings.js';
 
 export const STORAGE_KEY = 'cave-crystals-save';
 export const LEGACY_AUDIO_KEY = 'cave-crystals-audio';
 
-/** @typedef {import('./audio/AudioSettings.js').AudioSettingsData} AudioSettingsData */
-
-/**
- * @typedef {Object} InputSettings
- * @property {boolean} keyboard
- * @property {boolean} gamepad
- */
-
-/**
- * @typedef {Object} GameSettings
- * @property {import('./types.js').QualityMode} graphics
- * @property {import('./types.js').GameMode} gameMode
- * @property {boolean} reducedMotion
- * @property {boolean} colorBlindMode
- * @property {boolean} showTutorial
- * @property {boolean} tutorialCompleted
- * @property {InputSettings} input
- * @property {AudioSettingsData} audio
- */
-
-/**
- * @typedef {Object} GameStats
- * @property {number} highScore
- * @property {number} bestCombo
- * @property {number} totalGames
- * @property {number} totalShots
- * @property {number} totalMatches
- * @property {number} totalMismatches
- * @property {number} bossesDefeated
- * @property {number} timePlayedMs
- * @property {Record<string, number>} achievements Achievement id -> unlock timestamp (epoch ms).
- */
-
-/**
- * @typedef {Object} SaveData
- * @property {number} version
- * @property {GameSettings} settings
- * @property {GameStats} stats
- */
+/** @import { AudioSettingsData, GameSettings, GameStats, QualityMode, GameMode, RawGameSettings, RawSaveData, SaveData } from './types.js' */
 
 /** @type {GameSettings} */
 export const DEFAULT_SETTINGS = {
@@ -72,17 +33,36 @@ export const DEFAULT_STATS = {
 /** Bump when SaveData's shape changes in a way `normalizeSave` can't transparently absorb. */
 export const SAVE_VERSION = 2;
 
+/** Runtime mirror of `QualityMode` (types.js). Keep the two in sync. */
 const QUALITY_MODES = new Set(['auto', 'low', 'medium', 'high', 'dev']);
+/** Runtime mirror of `GameMode` (types.js). Keep the two in sync. */
 const GAME_MODES = new Set(['campaign', 'endless']);
 
 /**
- * @param {Partial<GameSettings>} raw
+ * @param {unknown} value
+ * @returns {value is QualityMode}
+ */
+function isQualityMode(value) {
+    return typeof value === 'string' && QUALITY_MODES.has(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is GameMode}
+ */
+function isGameMode(value) {
+    return typeof value === 'string' && GAME_MODES.has(value);
+}
+
+/**
+ * Validates settings from any source (see {@link RawGameSettings}), filling defaults.
+ * @param {RawGameSettings} [raw]
  * @returns {GameSettings}
  */
 export function normalizeSettings(raw = {}) {
-    const graphics = QUALITY_MODES.has(raw.graphics) ? raw.graphics : DEFAULT_SETTINGS.graphics;
-    const gameMode = GAME_MODES.has(raw.gameMode) ? raw.gameMode : DEFAULT_SETTINGS.gameMode;
-    const input = raw.input || {};
+    const graphics = isQualityMode(raw.graphics) ? raw.graphics : DEFAULT_SETTINGS.graphics;
+    const gameMode = isGameMode(raw.gameMode) ? raw.gameMode : DEFAULT_SETTINGS.gameMode;
+    const input = raw.input ?? {};
     return {
         graphics,
         gameMode,
@@ -99,7 +79,7 @@ export function normalizeSettings(raw = {}) {
 }
 
 /**
- * @param {Partial<GameStats>} raw
+ * @param {Partial<GameStats>} [raw]
  * @returns {GameStats}
  */
 export function normalizeStats(raw = {}) {
@@ -117,7 +97,7 @@ export function normalizeStats(raw = {}) {
 }
 
 /**
- * @param {Partial<SaveData>} raw
+ * @param {RawSaveData} [raw]
  * @returns {SaveData}
  */
 export function normalizeSave(raw = {}) {

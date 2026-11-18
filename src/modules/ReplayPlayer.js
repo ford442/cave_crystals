@@ -119,8 +119,10 @@ export class ReplayPlayer {
     }
 
     /**
+     * Replays inject their own events, so they never request lane movement or a shot here.
      * @param {import('./Game.js').Game} game
      * @param {number} dt
+     * @returns {import('./types.js').InputPollResult}
      */
     poll(game, dt) {
         if (!this._active || this._complete) {

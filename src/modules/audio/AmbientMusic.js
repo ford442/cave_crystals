@@ -1,4 +1,4 @@
-// @ts-nocheck
+/** @import { AmbientLayer, AmbientMusicState } from '../types.js' */
 
 /**
  * Procedural cave drone with layers driven by game state.
@@ -9,11 +9,12 @@ export class AmbientMusic {
         this.ctx = null;
         /** @type {GainNode | null} */
         this.musicBus = null;
-        /** @type {Array<{ osc: OscillatorNode, filter: BiquadFilterNode, gain: GainNode }>} */
+        /** @type {AmbientLayer[]} */
         this.layers = [];
         this.running = false;
         this.disposed = false;
         this.reducedIntensity = false;
+        /** @type {ReturnType<typeof setTimeout> | null} */
         this._fadeTimer = null;
     }
 
@@ -31,6 +32,7 @@ export class AmbientMusic {
         this.running = true;
 
         const t0 = ctx.currentTime;
+        /** @type {Array<{ type: OscillatorType, freq: number, q: number, baseGain: number }>} */
         const layerDefs = [
             { type: 'sine', freq: 55, q: 0.7, baseGain: 0.12 },
             { type: 'triangle', freq: 82.5, q: 1.0, baseGain: 0.08 },
@@ -42,7 +44,7 @@ export class AmbientMusic {
             const filter = ctx.createBiquadFilter();
             const gain = ctx.createGain();
 
-            osc.type = /** @type {OscillatorType} */ (def.type);
+            osc.type = def.type;
             osc.frequency.value = def.freq;
             filter.type = 'lowpass';
             filter.frequency.value = 320;
@@ -62,7 +64,7 @@ export class AmbientMusic {
     }
 
     /**
-     * @param {{ active?: boolean, criticalIntensity?: number, combo?: number, level?: number, reducedIntensity?: boolean }} state
+     * @param {AmbientMusicState} state
      */
     update(state) {
         if (!this.running || !this.ctx || this.layers.length === 0) return;

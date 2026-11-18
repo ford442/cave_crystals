@@ -1,0 +1,42 @@
+{
+  // Full `strict` for every file under src/, enforced by scripts/typecheck-strict.mjs (run as part
+  // of `npm run typecheck`). tsconfig.json is the floor for all files; this is the ratchet on top.
+  //
+  // New files are strict by default. `legacyStrictErrors` is the ceiling of strict-mode errors a
+  // pre-existing file may still have. It may only go down: the check fails if a file gets worse
+  // OR better, so a fix has to lower the number here (delete the entry at 0). Never raise one or
+  // add a file: write the new code with real types instead.
+  //
+  // Burn-down: `npx tsc -p tsconfig.strict.json --pretty false | grep <file>`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true
+  },
+  "legacyStrictErrors": {
+    "src/main.js": 1,
+    "src/modules/Entities.js": 92,
+    "src/modules/Game.js": 46,
+    "src/modules/ParticleWorkerBridge.js": 1,
+    "src/modules/Renderer.js": 4,
+    "src/modules/RendererConstants.js": 1,
+    "src/modules/WasmManager.js": 44,
+    "src/modules/WebGpuParticleIntegrator.js": 13,
+    "src/modules/content/schema.js": 1,
+    "src/modules/content/validateContent.js": 1,
+    "src/modules/particleBatchCodec.js": 20,
+    "src/modules/renderers/CaveRenderer.js": 122,
+    "src/modules/renderers/CrystalRenderer.js": 219,
+    "src/modules/renderers/HudEffectsRenderer.js": 269,
+    "src/modules/renderers/ParticleRenderer.js": 262,
+    "src/modules/renderers/PostEffectsRenderer.js": 34,
+    "src/modules/renderers/RendererHost.js": 13,
+    "src/modules/renderers/canvasContext.js": 1,
+    "src/modules/renderers/postfx/Canvas2DPostFxBackend.js": 38,
+    "src/modules/renderers/postfx/WebGL2PostFxBackend.js": 13,
+    "src/modules/systems/GameLoop.js": 20,
+    "src/modules/systems/JuiceSystem.js": 22,
+    "src/modules/systems/registerSystems.js": 1,
+    "src/pwa/registerPwa.js": 2,
+    "src/workers/particleIntegrator.worker.js": 1
+  }
+}

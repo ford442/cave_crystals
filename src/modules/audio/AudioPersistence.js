@@ -1,10 +1,10 @@
-// @ts-nocheck
+/** @import { AudioSettingsData } from '../types.js' */
 import { LEGACY_AUDIO_KEY, STORAGE_KEY } from '../SaveManager.js';
 import { normalizeSettings } from './AudioSettings.js';
 
 /**
  * Load saved audio preferences from localStorage (main save, then legacy key).
- * @returns {import('./AudioSettings.js').AudioSettingsData | null}
+ * @returns {AudioSettingsData | null}
  */
 export function loadPersistedAudioSettings() {
     if (typeof localStorage === 'undefined') return null;
@@ -32,7 +32,7 @@ export function loadPersistedAudioSettings() {
 }
 
 /**
- * @param {import('./AudioSettings.js').AudioSettingsData} settings
+ * @param {AudioSettingsData} settings
  */
 export function persistAudioSettings(settings) {
     if (typeof localStorage === 'undefined') return;

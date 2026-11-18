@@ -785,4 +785,161 @@
  * @property {HTMLElement | null} achievementsList
  */
 
+// ---------------------------------------------------------------------------
+// Persisted settings and stats (SaveManager, SettingsManager)
+// ---------------------------------------------------------------------------
+
+/**
+ * Persisted audio preferences. Every level is a unit gain in 0..1.
+ * @typedef {Object} AudioSettingsData
+ * @property {number} master
+ * @property {number} music
+ * @property {number} sfx
+ * @property {number} ui
+ * @property {boolean} muted
+ * @property {boolean} reducedIntensity Quieter SFX and no tension/combo layers in the ambient bed.
+ */
+
+/**
+ * @typedef {Object} InputSettings
+ * @property {boolean} keyboard
+ * @property {boolean} gamepad
+ */
+
+/**
+ * Validated settings as stored in the save and used at runtime.
+ * @typedef {Object} GameSettings
+ * @property {QualityMode} graphics
+ * @property {GameMode} gameMode
+ * @property {boolean} reducedMotion
+ * @property {boolean} colorBlindMode
+ * @property {boolean} showTutorial
+ * @property {boolean} tutorialCompleted
+ * @property {InputSettings} input
+ * @property {AudioSettingsData} audio
+ */
+
+/**
+ * Settings from outside the type system: parsed localStorage JSON, a save written by an
+ * older version, or a raw DOM control value. `normalizeSettings` accepts this and returns a
+ * validated {@link GameSettings}. Every `GameSettings` is also a valid `RawGameSettings`.
+ * @typedef {Omit<Partial<GameSettings>, 'graphics' | 'gameMode' | 'input' | 'audio'> & {
+ *     graphics?: string,
+ *     gameMode?: string,
+ *     input?: Partial<InputSettings>,
+ *     audio?: Partial<AudioSettingsData>,
+ * }} RawGameSettings
+ */
+
+/**
+ * @typedef {Object} GameStats
+ * @property {number} highScore
+ * @property {number} bestCombo
+ * @property {number} totalGames
+ * @property {number} totalShots
+ * @property {number} totalMatches
+ * @property {number} totalMismatches
+ * @property {number} bossesDefeated
+ * @property {number} timePlayedMs
+ * @property {Record<string, number>} achievements Achievement id -> unlock timestamp (epoch ms).
+ */
+
+/**
+ * @typedef {Object} SaveData
+ * @property {number} version
+ * @property {GameSettings} settings
+ * @property {GameStats} stats
+ */
+
+/**
+ * A save blob before validation. `normalizeSave` accepts this and returns {@link SaveData}.
+ * @typedef {Object} RawSaveData
+ * @property {number} [version]
+ * @property {RawGameSettings} [settings]
+ * @property {Partial<GameStats>} [stats]
+ */
+
+// ---------------------------------------------------------------------------
+// Input polling (InputManager, ReplayPlayer, GameLoop)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lane movement requested this frame: one lane left, none, or one lane right.
+ * @typedef {-1 | 0 | 1} LaneDelta
+ */
+
+/**
+ * What one input source (keyboard/gamepad or a replay) asks for this frame.
+ * @typedef {Object} InputPollResult
+ * @property {LaneDelta} laneDelta
+ * @property {boolean} fire Buffered fire intent. It stays true until `InputManager#consumeFire`.
+ */
+
+/**
+ * Which physical sources `InputManager#poll` should read. A missing key counts as enabled.
+ * @typedef {Partial<InputSettings>} InputPollSettings
+ */
+
+// ---------------------------------------------------------------------------
+// Tutorial (TutorialManager)
+// ---------------------------------------------------------------------------
+
+/**
+ * `idle` before the tutorial starts and `complete` after it ends or is skipped. Neither shows copy.
+ * @typedef {'idle' | 'aim' | 'match' | 'mismatch' | 'hints' | 'complete'} TutorialStep
+ */
+
+/**
+ * Keys of the tutorial copy table: one per visible step, plus the keyboard variant of `aim`
+ * and the two context hints that can replace the `hints` copy.
+ * @typedef {Exclude<TutorialStep, 'idle' | 'complete'> | 'aimKeyboard' | 'combo' | 'critical'} TutorialCopyKey
+ */
+
+// ---------------------------------------------------------------------------
+// Audio (SoundManager, AmbientMusic, audio/*)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {'master' | 'music' | 'sfx' | 'ui'} AudioChannel
+ */
+
+/**
+ * The gain nodes a synthesized sound can be routed through. `masterGain` feeds the destination
+ * and the other three feed `masterGain`.
+ * @typedef {Object} AudioBuses
+ * @property {GainNode} masterGain
+ * @property {GainNode} musicGain
+ * @property {GainNode} sfxGain
+ * @property {GainNode} uiGain
+ */
+
+/**
+ * Game state the ambient bed reacts to, as passed to `SoundManager#updateSession`.
+ * @typedef {Object} AudioSessionState
+ * @property {boolean} [active] False while paused. A missing value counts as active.
+ * @property {number} [criticalIntensity] 0..1 danger level.
+ * @property {number} [combo]
+ * @property {number} [level]
+ */
+
+/**
+ * {@link AudioSessionState} plus the intensity preference that `SoundManager` merges in.
+ * @typedef {AudioSessionState & { reducedIntensity?: boolean }} AmbientMusicState
+ */
+
+/**
+ * One oscillator voice of the ambient drone, wired osc -> filter -> gain -> music bus.
+ * @typedef {Object} AmbientLayer
+ * @property {OscillatorNode} osc
+ * @property {BiquadFilterNode} filter
+ * @property {GainNode} gain
+ */
+
+/**
+ * The part of `SoundManager` that browser-lifecycle code needs.
+ * @typedef {Object} AudioResumable
+ * @property {() => Promise<void> | undefined} resume Resolves when an AudioContext resumes.
+ *   Returns undefined when there is nothing to resume.
+ */
+
 export {};

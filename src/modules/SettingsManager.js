@@ -1,10 +1,28 @@
-// @ts-nocheck
+/** @import { Game } from './Game.js' */
+/** @import { SaveManager } from './SaveManager.js' */
+/** @import { GameSettings, RawGameSettings } from './types.js' */
 import { SoundManager } from './Audio.js';
 import { getActivePalette } from './ColorPalettes.js';
 import { normalizeSettings } from './SaveManager.js';
 
 const MOTION_SCALE_REDUCED = 0.2;
 const MOTION_SCALE_NORMAL = 1.0;
+
+/** Volume sliders bound through `data-audio`, in the order they are synced. */
+const VOLUME_CONTROLS = /** @type {const} */ (['master', 'music', 'sfx']);
+
+/**
+ * First element under `root` that matches `selector` and is a `Type`, or null.
+ * @template {Element} T
+ * @param {ParentNode} root
+ * @param {string} selector
+ * @param {new (...args: any[]) => T} Type
+ * @returns {T | null}
+ */
+function findControl(root, selector, Type) {
+    const el = root.querySelector(selector);
+    return el instanceof Type ? el : null;
+}
 
 export class SettingsManager {
     /**
@@ -13,7 +31,7 @@ export class SettingsManager {
     constructor(saveManager) {
         this.saveManager = saveManager;
         this._uiBound = false;
-        /** @type {import('./Game.js').Game | null} */
+        /** @type {Game | null} */
         this._game = null;
     }
 
@@ -21,12 +39,12 @@ export class SettingsManager {
         this.saveManager.load();
     }
 
-    /** @returns {import('./SaveManager.js').GameSettings} */
+    /** @returns {GameSettings} */
     get settings() {
         return this.saveManager.getSettings();
     }
 
-    /** @returns {import('./SaveManager.js').GameSettings} */
+    /** @returns {GameSettings} */
     get() {
         return this.saveManager.getSettings();
     }
@@ -36,7 +54,7 @@ export class SettingsManager {
     }
 
     /**
-     * @param {import('./Game.js').Game} game
+     * @param {Game} game
      */
     apply(game) {
         this._game = game;
@@ -56,18 +74,18 @@ export class SettingsManager {
 
     /**
      * @param {{ startRoot?: HTMLElement | null, pauseRoot?: HTMLElement | null }} roots
-     * @param {import('./Game.js').Game} game
+     * @param {Game} game
      */
     bindUI(roots, game) {
         if (this._uiBound) return;
         this._game = game;
-        const groups = [roots.startRoot, roots.pauseRoot].filter(Boolean);
+        const groups = [roots.startRoot, roots.pauseRoot].filter((root) => root != null);
         if (groups.length === 0) return;
         this._uiBound = true;
 
         for (const root of groups) {
-            root.addEventListener('input', (e) => this._onUIChange(/** @type {Event} */ (e)));
-            root.addEventListener('change', (e) => this._onUIChange(/** @type {Event} */ (e)));
+            root.addEventListener('input', (e) => this._onUIChange(e));
+            root.addEventListener('change', (e) => this._onUIChange(e));
         }
 
         this.syncAllUI();
@@ -75,31 +93,35 @@ export class SettingsManager {
 
     /** @param {Event} e */
     _onUIChange(e) {
-        const target = /** @type {HTMLElement} */ (e.target);
+        const target = e.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
         const settingKey = target.getAttribute('data-setting');
         const audioKey = target.getAttribute('data-audio');
         if (!settingKey && !audioKey) return;
 
+        const value = target.value;
+        const checked = target instanceof HTMLInputElement && target.checked;
+        /** @type {RawGameSettings} */
         const settings = { ...this.get() };
 
         if (settingKey === 'graphics' || settingKey === 'gameMode') {
-            settings[settingKey] = /** @type {HTMLSelectElement} */ (target).value;
+            settings[settingKey] = value;
         } else if (settingKey === 'reducedMotion' || settingKey === 'colorBlindMode' || settingKey === 'showTutorial') {
-            settings[settingKey] = /** @type {HTMLInputElement} */ (target).checked;
+            settings[settingKey] = checked;
             if (settingKey === 'showTutorial' && settings.showTutorial) {
                 settings.tutorialCompleted = false;
             }
         } else if (settingKey === 'input.keyboard' || settingKey === 'input.gamepad') {
-            const field = settingKey.split('.')[1];
-            settings.input = { ...settings.input, [field]: /** @type {HTMLInputElement} */ (target).checked };
+            const field = settingKey === 'input.keyboard' ? 'keyboard' : 'gamepad';
+            settings.input = { ...settings.input, [field]: checked };
         } else if (audioKey) {
             const audio = { ...settings.audio };
             if (audioKey === 'master' || audioKey === 'music' || audioKey === 'sfx') {
-                audio[audioKey] = Number(/** @type {HTMLInputElement} */ (target).value) / 100;
+                audio[audioKey] = Number(value) / 100;
             } else if (audioKey === 'mute') {
-                audio.muted = /** @type {HTMLInputElement} */ (target).checked;
+                audio.muted = checked;
             } else if (audioKey === 'reduced') {
-                audio.reducedIntensity = /** @type {HTMLInputElement} */ (target).checked;
+                audio.reducedIntensity = checked;
             }
             settings.audio = audio;
         }
@@ -114,13 +136,13 @@ export class SettingsManager {
         for (const root of [document.getElementById('startScreen'), document.getElementById('pauseScreen')]) {
             if (!root) continue;
 
-            const graphics = root.querySelector('[data-setting="graphics"]');
-            const gameMode = root.querySelector('[data-setting="gameMode"]');
-            const reducedMotion = root.querySelector('[data-setting="reducedMotion"]');
-            const colorBlind = root.querySelector('[data-setting="colorBlindMode"]');
-            const showTutorial = root.querySelector('[data-setting="showTutorial"]');
-            const keyboard = root.querySelector('[data-setting="input.keyboard"]');
-            const gamepad = root.querySelector('[data-setting="input.gamepad"]');
+            const graphics = findControl(root, '[data-setting="graphics"]', HTMLSelectElement);
+            const gameMode = findControl(root, '[data-setting="gameMode"]', HTMLSelectElement);
+            const reducedMotion = findControl(root, '[data-setting="reducedMotion"]', HTMLInputElement);
+            const colorBlind = findControl(root, '[data-setting="colorBlindMode"]', HTMLInputElement);
+            const showTutorial = findControl(root, '[data-setting="showTutorial"]', HTMLInputElement);
+            const keyboard = findControl(root, '[data-setting="input.keyboard"]', HTMLInputElement);
+            const gamepad = findControl(root, '[data-setting="input.gamepad"]', HTMLInputElement);
 
             if (graphics) graphics.value = settings.graphics;
             if (gameMode) gameMode.value = settings.gameMode;
@@ -130,16 +152,16 @@ export class SettingsManager {
             if (keyboard) keyboard.checked = settings.input.keyboard;
             if (gamepad) gamepad.checked = settings.input.gamepad;
 
-            for (const key of ['master', 'music', 'sfx']) {
-                const slider = root.querySelector(`[data-audio="${key}"]`);
+            for (const key of VOLUME_CONTROLS) {
+                const slider = findControl(root, `[data-audio="${key}"]`, HTMLInputElement);
                 const label = root.querySelector(`[data-audio-label="${key}"]`);
                 if (slider) {
                     slider.value = String(Math.round(settings.audio[key] * 100));
                     if (label) label.textContent = `${slider.value}%`;
                 }
             }
-            const mute = root.querySelector('[data-audio="mute"]');
-            const reduced = root.querySelector('[data-audio="reduced"]');
+            const mute = findControl(root, '[data-audio="mute"]', HTMLInputElement);
+            const reduced = findControl(root, '[data-audio="reduced"]', HTMLInputElement);
             if (mute) mute.checked = settings.audio.muted;
             if (reduced) reduced.checked = settings.audio.reducedIntensity;
         }
