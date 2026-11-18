@@ -47,6 +47,14 @@ export const ACHIEVEMENTS = [
         check: (payload) => payload.bossId === 'convergence',
     },
     {
+        id: 'boss_fractured_heart',
+        name: 'Heartbreaker',
+        description: 'Defeat the Fractured Heart at the end of Arc II.',
+        icon: '💔',
+        event: 'boss_defeat',
+        check: (payload) => payload.bossId === 'fractured_heart',
+    },
+    {
         id: 'perfect_level',
         name: 'Flawless',
         description: 'Complete a campaign level with zero mismatches.',

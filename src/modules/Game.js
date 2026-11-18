@@ -16,13 +16,22 @@ import { particleWorkerBridge } from './ParticleWorkerBridge.js';
 import { registerSystems } from './systems/registerSystems.js';
 import { ProgressionManager } from './ProgressionManager.js';
 import { PowerUpManager } from './PowerUpManager.js';
-import { POWER_UPS, POWER_UP_TYPES } from './PowerUpDefinitions.js';
+import { POWER_UPS, ACTIVATION_MODES } from './PowerUpDefinitions.js';
+import { ARCS, LEVELS, getArcForLevelId, getLevelIndexForBoss } from './LevelDefinitions.js';
+import { HazardController } from './HazardController.js';
 import { TutorialManager } from './TutorialManager.js';
 import { BossController } from './BossController.js';
 import * as gameplayRng from './GameplayRng.js';
 import { ReplayRecorder } from './ReplayRecorder.js';
 import { ReplayPlayer } from './ReplayPlayer.js';
 import { parseReplayFile } from './replayFormat.js';
+
+/** Keys that use a held on-activate power-up (from each definition's `activateKey`). */
+const ACTIVATE_KEYS = new Set(
+    Object.values(POWER_UPS)
+        .filter(def => def.activation === ACTIVATION_MODES.ON_ACTIVATE && def.activateKey)
+        .map(def => def.activateKey)
+);
 
 /**
  * Core game controller composed from explicit subsystems in ./systems/.
@@ -50,6 +59,7 @@ export class Game {
         this.progression = new ProgressionManager();
         this.powerUps = new PowerUpManager();
         this.boss = new BossController();
+        this.hazards = new HazardController();
         const initialCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));
         this.renderer = new Renderer(initialCanvas);
         this.launcher = new Launcher(this.renderer.laneWidth, this.renderer.height);
@@ -171,6 +181,7 @@ export class Game {
             colorPalette: DEFAULT_PALETTE,
             gameClockMs: 0,
             boss: null,
+            hazards: null,
         };
 
         this.replay = {
@@ -306,7 +317,7 @@ export class Game {
             if (e.code === 'KeyP' && !e.repeat) {
                 this.toggleDevPerfOverlay();
             }
-            if (e.code === 'KeyE' && !e.repeat && this.state.active) {
+            if (ACTIVATE_KEYS.has(e.code) && !e.repeat && this.state.active) {
                 this.activateHeldPowerUp();
             }
             const devMode = import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev');
@@ -391,6 +402,7 @@ export class Game {
         wasmManager.setGameplaySeed(seed);
         this.progression.setRng(gameplayRng.next);
         this.powerUps.setRng(gameplayRng.next);
+        this.hazards.setRng(gameplayRng.next);
         this.systems.collision.setGameplayContext(
             this.progression.getSpawnConfig().colorCount,
             gameplayRng.next
@@ -402,11 +414,13 @@ export class Game {
         this.progression.reset();
         this.progression.setMode(config.gameMode);
         if (config.levelIndex > 0) {
-            this.progression.levelIndex = Math.min(config.levelIndex, 4);
+            this.progression.levelIndex = Math.min(config.levelIndex, LEVELS.length - 1);
         }
         this.powerUps.reset();
         this.boss.reset();
+        this.hazards.reset();
         this.state.boss = null;
+        this.state.hazards = null;
         this._lastShotAt = 0;
 
         this.state.active = true;
@@ -482,7 +496,65 @@ export class Game {
         this.updateUI();
         this.updatePowerUpHud();
         this.initCrystals();
+        this._applyLevelContent();
         this._maybeStartBoss();
+    }
+
+    /**
+     * Configure the data-driven parts of the active level: lane hazards, the power-up drop
+     * pool, and the arc banner when a new arc begins.
+     */
+    _applyLevelContent() {
+        const spawn = this.progression.getSpawnConfig();
+        if (this.progression.isEndless()) {
+            this.hazards.reset();
+            this.powerUps.setPool(null);
+            this.state.hazards = null;
+            return;
+        }
+        const level = /** @type {import('./types.js').LevelDefinition} */ (this.progression.getActiveConfig());
+        this.hazards.configure(level.hazards, { lanes: spawn.lanes, colorCount: spawn.colorCount });
+        this.powerUps.setPool(level.powerUpPool);
+        this.state.hazards = this.hazards.getRenderState();
+
+        // Arc banner on the first level of every arc after the first.
+        const arc = getArcForLevelId(level.id);
+        if (arc && arc !== ARCS[0] && arc.levels[0]?.id === level.id) {
+            const color = arc.color || '#FFD700';
+            const title = arc.subtitle ? `${arc.subtitle}: ${arc.name}` : arc.name;
+            this.createFloatingText(this.renderer.width / 2, this.renderer.height * 0.4, title.toUpperCase(), color, 2.4);
+            this.createShockwave(this.renderer.width / 2, this.renderer.height / 2, color);
+        }
+    }
+
+    /**
+     * Juice for hazard warnings/triggers returned by HazardController.update().
+     * @param {import('./HazardController.js').HazardEvent} event
+     */
+    onHazardEvent(event) {
+        const laneW = this.renderer.laneWidth;
+        const color = event.kind === 'tremor' ? '#FF8844' : '#FF77E1';
+        const m = this.state.motionScale;
+        if (event.type === 'warning') {
+            SoundManager.hazardWarning();
+            return;
+        }
+        for (const lane of event.lanes) {
+            const x = lane * laneW + laneW / 2;
+            const y = this.renderer.height / 2;
+            this.createShockwave(x, y, color);
+            this.createParticles(x, y, color, 14);
+        }
+        const label = event.kind === 'tremor' ? 'TREMOR!' : 'SHIFT!';
+        const firstX = event.lanes.length ? event.lanes[0] * laneW + laneW / 2 : this.renderer.width / 2;
+        this.createFloatingText(firstX, this.renderer.height * 0.3, label, color, 1.6);
+        if (event.kind === 'tremor') {
+            this.state.shake = Math.max(this.state.shake, 18 * m);
+            SoundManager.bossSting();
+        } else {
+            SoundManager.powerUpActivate();
+        }
+        this.updateLaneMap();
     }
 
     /**
@@ -534,9 +606,9 @@ export class Game {
         const defLevel = /** @type {import('./types.js').LevelDefinition | undefined} */ (
             this.progression.getActiveConfig()
         );
-        if (!this.progression.isEndless() && defLevel && !defLevel.bossId) {
-            // Find level index with matching boss
-            this.progression.levelIndex = 4; // Level 5 — The Convergence
+        const bossLevelIndex = getLevelIndexForBoss(bossId);
+        if (!this.progression.isEndless() && defLevel && defLevel.bossId !== bossId && bossLevelIndex >= 0) {
+            this.progression.levelIndex = bossLevelIndex;
             this.beginCurrentLevel();
             if (this.boss.isBusy()) return true;
         }
@@ -553,9 +625,8 @@ export class Game {
         this.save.recordBossDefeat();
         this.systems.achievements.onBossDefeat(def?.id);
         this.state.score += rewards.scoreBonus || 0;
-        const rainbows = rewards.rainbowCount || 0;
-        for (let i = 0; i < rainbows; i++) {
-            this.grantPowerUp(POWER_UP_TYPES.RAINBOW);
+        for (const [typeId, count] of Object.entries(rewards.powerUps || {})) {
+            for (let i = 0; i < count; i++) this.grantPowerUp(typeId);
         }
 
         this.state.shake = Math.max(this.state.shake, 35 * this.state.motionScale);
@@ -746,7 +817,7 @@ export class Game {
         if (!this.state.active) return;
         if (this.replay.player.isActive() && !options.fromReplay) return;
         const lane = this.launcher.targetLane;
-        const result = this.powerUps.activateHeld(lane, this.state.crystals, POWER_UP_TYPES.LANE_SHOCKWAVE);
+        const result = this.powerUps.activateHeld(lane, this.state.crystals);
         if (!result) return;
 
         const def = POWER_UPS[result.typeId];
@@ -754,12 +825,16 @@ export class Game {
         const laneY = this.renderer.height / 2;
 
         SoundManager.powerUpActivate();
-        this.createShockwave(laneX, laneY, def.color);
+        for (const hitLane of result.lanes) {
+            if (hitLane >= GAME_CONFIG.lanes) continue;
+            const x = (hitLane * this.renderer.laneWidth) + (this.renderer.laneWidth / 2);
+            this.createShockwave(x, laneY, def.color);
+            this.createParticles(x, laneY, def.color, hitLane === lane ? 30 : 16);
+        }
         this.systems.juice.addEnergyRing(laneX, laneY, def.color, 3);
-        this.createParticles(laneX, laneY, def.color, 30);
-        this.createFloatingText(laneX, laneY - 40, 'SHOCKWAVE!', def.color, 2.0);
+        this.createFloatingText(laneX, laneY - 40, def.activateText || def.hudLabel, def.color, 2.0);
         const m = this.state.motionScale;
-        this.state.shake = Math.max(this.state.shake, 20 * m);
+        this.state.shake = Math.max(this.state.shake, (result.lanes.length > 1 ? 26 : 20) * m);
         this.state.impactFlash = 0.4 * m;
         this.state.impactFlashColor = def.color;
         if (!options.fromReplay) {
@@ -785,7 +860,7 @@ export class Game {
         }).join('');
 
         if (this.ui.powerUpActivateBtn) {
-            const showActivate = this.powerUps.getHeldCount(POWER_UP_TYPES.LANE_SHOCKWAVE) > 0;
+            const showActivate = this.powerUps.hasActivatableHeld();
             this.ui.powerUpActivateBtn.classList.toggle('hidden', !showActivate);
         }
     }

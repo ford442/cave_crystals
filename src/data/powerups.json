@@ -1,0 +1,85 @@
+{
+  "drops": {
+    "minCombo": 3,
+    "comboBonus": 0.015
+  },
+  "defaultPool": ["rainbow", "freeze", "lane_shockwave"],
+  "powerUps": [
+    {
+      "id": "rainbow",
+      "name": "Rainbow Spore",
+      "activation": "on_shoot",
+      "durationMs": null,
+      "rarity": 0.09,
+      "color": "#ffffff",
+      "hudLabel": "RAINBOW",
+      "icon": "◈",
+      "description": "Next shot matches any color",
+      "effect": { "kind": "rainbow_shot", "charges": 1 }
+    },
+    {
+      "id": "freeze",
+      "name": "Crystal Freeze",
+      "activation": "on_pickup",
+      "durationMs": 5000,
+      "rarity": 0.07,
+      "color": "#88ddff",
+      "hudLabel": "FREEZE",
+      "icon": "❄",
+      "description": "Stop crystal growth for 5s",
+      "effect": { "kind": "growth_scale", "scale": 0 }
+    },
+    {
+      "id": "lane_shockwave",
+      "name": "Lane Shockwave",
+      "activation": "on_activate",
+      "durationMs": null,
+      "rarity": 0.06,
+      "color": "#ffaa00",
+      "hudLabel": "SHOCK",
+      "icon": "⚡",
+      "description": "Shrink crystals in your lane (E / tap USE)",
+      "activateKey": "KeyE",
+      "activateText": "SHOCKWAVE!",
+      "effect": { "kind": "lane_shockwave", "shrink": 80, "minHeight": 10, "radius": 0 }
+    },
+    {
+      "id": "temporal_drift",
+      "name": "Temporal Drift",
+      "activation": "on_pickup",
+      "durationMs": 9000,
+      "rarity": 0.05,
+      "color": "#7CF5C8",
+      "hudLabel": "DRIFT",
+      "icon": "⧗",
+      "description": "Crystals grow at 40% speed for 9s",
+      "effect": { "kind": "growth_scale", "scale": 0.4 }
+    },
+    {
+      "id": "prism_volley",
+      "name": "Prism Volley",
+      "activation": "on_shoot",
+      "durationMs": null,
+      "rarity": 0.04,
+      "color": "#FF77E1",
+      "hudLabel": "PRISM",
+      "icon": "✦",
+      "description": "Next 3 shots match any color",
+      "effect": { "kind": "rainbow_shot", "charges": 3 }
+    },
+    {
+      "id": "fault_quake",
+      "name": "Fault Quake",
+      "activation": "on_activate",
+      "durationMs": null,
+      "rarity": 0.04,
+      "color": "#FF6B3D",
+      "hudLabel": "QUAKE",
+      "icon": "☄",
+      "description": "Shrink your lane and both neighbours (E / tap USE)",
+      "activateKey": "KeyE",
+      "activateText": "FAULT QUAKE!",
+      "effect": { "kind": "lane_shockwave", "shrink": 55, "minHeight": 10, "radius": 1 }
+    }
+  ]
+}

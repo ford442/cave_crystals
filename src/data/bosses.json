@@ -46,7 +46,79 @@
       ],
       "rewards": {
         "scoreBonus": 500,
-        "rainbowCount": 2
+        "powerUps": {
+          "rainbow": 2
+        }
+      }
+    },
+    {
+      "id": "fractured_heart",
+      "name": "The Fractured Heart",
+      "triggerLevelId": 10,
+      "colors": {
+        "primary": "#B388FF",
+        "secondary": "#7CF5C8",
+        "telegraph": "#FF6B3D",
+        "vulnerable": "#FF77E1"
+      },
+      "hp": 10,
+      "introMs": 3000,
+      "defeatMs": 2600,
+      "fireRateMultiplier": 0.75,
+      "colorLockAlternating": false,
+      "phases": [
+        {
+          "id": "split_edges",
+          "formationPhase": 2,
+          "telegraphMs": 1500,
+          "surgeMs": 900,
+          "vulnerableMs": 4200,
+          "surgeGrowth": 0.6,
+          "idleGrowth": 0.05
+        },
+        {
+          "id": "shard_ridges",
+          "formationPhase": 1,
+          "telegraphMs": 1400,
+          "surgeMs": 1000,
+          "vulnerableMs": 4000,
+          "surgeGrowth": 0.7,
+          "idleGrowth": 0.05
+        },
+        {
+          "id": "heart_spike",
+          "formationPhase": 0,
+          "telegraphMs": 1300,
+          "surgeMs": 1100,
+          "vulnerableMs": 3800,
+          "surgeGrowth": 0.8,
+          "idleGrowth": 0.06
+        },
+        {
+          "id": "resonant_wave",
+          "formationPhase": 3,
+          "telegraphMs": 1200,
+          "surgeMs": 1200,
+          "vulnerableMs": 2800,
+          "surgeGrowth": 0.85,
+          "idleGrowth": 0.07
+        },
+        {
+          "id": "shatter_storm",
+          "formationPhase": 4,
+          "telegraphMs": 1000,
+          "surgeMs": 1300,
+          "vulnerableMs": 3200,
+          "surgeGrowth": 0.9,
+          "idleGrowth": 0.08
+        }
+      ],
+      "rewards": {
+        "scoreBonus": 1000,
+        "powerUps": {
+          "prism_volley": 1,
+          "fault_quake": 1
+        }
       }
     }
   ]

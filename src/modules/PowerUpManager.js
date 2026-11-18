@@ -2,15 +2,20 @@
 
 import {
     POWER_UPS,
-    POWER_UP_TYPES,
     ACTIVATION_MODES,
+    DEFAULT_POWER_UP_POOL,
     POWER_UP_MIN_COMBO,
     POWER_UP_COMBO_BONUS,
 } from './PowerUpDefinitions.js';
 import { applyLaneShockwave, rollPowerUpDrop } from './PowerUpEffects.js';
 
+/** Catalog entries in authored order — iteration order decides which held item is used first. */
+const CATALOG = Object.values(POWER_UPS);
+
 /**
  * Owns held inventory, timed effects, and activation plumbing for power-ups.
+ * Behaviour is chosen by each definition's `effect.kind`, never by its id, so new
+ * power-ups that reuse an existing kind are pure data (src/data/powerups.json).
  */
 export class PowerUpManager {
     constructor() {
@@ -22,6 +27,22 @@ export class PowerUpManager {
         this.totalMatches = 0;
         /** @type {() => number} */
         this._rng = Math.random;
+        /** @type {readonly string[]} */
+        this._pool = DEFAULT_POWER_UP_POOL;
+    }
+
+    /**
+     * Restrict drops to these ids (a level's `powerUpPool`); pass nothing for the default pool.
+     * Unknown ids are ignored — content validation already rejects them.
+     * @param {readonly string[] | null} [ids]
+     */
+    setPool(ids) {
+        this._pool = ids && ids.length ? ids.filter(id => POWER_UPS[id]) : DEFAULT_POWER_UP_POOL;
+    }
+
+    /** @returns {readonly string[]} */
+    getPool() {
+        return this._pool;
     }
 
     /** @param {() => number} rng */
@@ -45,7 +66,8 @@ export class PowerUpManager {
             return true;
         }
 
-        this.held[typeId] = (this.held[typeId] || 0) + count;
+        const perPickup = def.effect.kind === 'rainbow_shot' ? (def.effect.charges ?? 1) : 1;
+        this.held[typeId] = (this.held[typeId] || 0) + count * perPickup;
         return true;
     }
 
@@ -76,7 +98,7 @@ export class PowerUpManager {
      */
     rollPickup(combo) {
         this.totalMatches++;
-        const catalog = Object.values(POWER_UPS).map(def => ({ id: def.id, rarity: def.rarity }));
+        const catalog = this._pool.map(id => ({ id, rarity: POWER_UPS[id].rarity }));
         return rollPowerUpDrop(
             catalog,
             combo,
@@ -86,46 +108,76 @@ export class PowerUpManager {
         );
     }
 
+    /** @param {string} typeId */
+    _consumeOne(typeId) {
+        this.held[typeId]--;
+        if (this.held[typeId] <= 0) delete this.held[typeId];
+    }
+
+    /** @returns {string | null} First held on-shoot power-up, in catalog order. */
+    _nextShotModifierId() {
+        for (const def of CATALOG) {
+            if (def.activation === ACTIVATION_MODES.ON_SHOOT && (this.held[def.id] || 0) > 0) return def.id;
+        }
+        return null;
+    }
+
+    /** @returns {boolean} */
+    hasShotModifierHeld() {
+        return this._nextShotModifierId() !== null;
+    }
+
     /** @returns {SporeModifiers} */
     consumeShotModifiers() {
-        if (!this.held[POWER_UP_TYPES.RAINBOW]) return {};
-        this.held[POWER_UP_TYPES.RAINBOW]--;
-        if (this.held[POWER_UP_TYPES.RAINBOW] <= 0) delete this.held[POWER_UP_TYPES.RAINBOW];
+        const typeId = this._nextShotModifierId();
+        if (!typeId) return {};
+        this._consumeOne(typeId);
+        // rainbow_shot is the only on_shoot effect kind today.
         return { rainbow: true };
+    }
+
+    /** @returns {string | null} First held on-activate power-up, in catalog order. */
+    getNextActivatableId() {
+        for (const def of CATALOG) {
+            if (def.activation === ACTIVATION_MODES.ON_ACTIVATE && (this.held[def.id] || 0) > 0) return def.id;
+        }
+        return null;
     }
 
     /** @returns {boolean} */
     hasActivatableHeld() {
-        return Object.entries(POWER_UPS).some(([id, def]) => {
-            return def.activation === ACTIVATION_MODES.ON_ACTIVATE && (this.held[id] || 0) > 0;
-        });
+        return this.getNextActivatableId() !== null;
     }
 
     /**
+     * Use a held on-activate power-up centred on `lane`.
      * @param {number} lane
-     * @param {import('./Entities.js').Crystal[]} crystals
-     * @param {string} [preferredType]
-     * @returns {{ typeId: string, lane: number, affected: import('./types.js').Crystal[] } | null}
+     * @param {import('./types.js').Crystal[]} crystals
+     * @param {string} [preferredType] Use this id if held; otherwise the first held in catalog order.
+     * @returns {{ typeId: string, lane: number, lanes: number[], affected: import('./types.js').Crystal[] } | null}
      */
     activateHeld(lane, crystals, preferredType) {
-        const candidates = preferredType
-            ? [preferredType]
-            : Object.keys(POWER_UPS).filter(id => POWER_UPS[id].activation === ACTIVATION_MODES.ON_ACTIVATE);
+        const typeId = preferredType && (this.held[preferredType] || 0) > 0
+            && POWER_UPS[preferredType]?.activation === ACTIVATION_MODES.ON_ACTIVATE
+            ? preferredType
+            : this.getNextActivatableId();
+        if (!typeId) return null;
+        const effect = POWER_UPS[typeId].effect;
+        this._consumeOne(typeId);
 
-        for (const typeId of candidates) {
-            if (!this.held[typeId]) continue;
-            this.held[typeId]--;
-            if (this.held[typeId] <= 0) delete this.held[typeId];
-
-            if (typeId === POWER_UP_TYPES.LANE_SHOCKWAVE) {
-                return {
-                    typeId,
-                    lane,
-                    affected: applyLaneShockwave(crystals, lane),
-                };
+        if (effect.kind === 'lane_shockwave') {
+            const radius = effect.radius ?? 0;
+            const lanes = [];
+            /** @type {import('./types.js').Crystal[]} */
+            const affected = [];
+            for (let l = lane - radius; l <= lane + radius; l++) {
+                if (l < 0) continue;
+                lanes.push(l);
+                affected.push(...applyLaneShockwave(crystals, l, effect.shrink, effect.minHeight ?? 10));
             }
+            return { typeId, lane, lanes, affected };
         }
-        return null;
+        return { typeId, lane, lanes: [lane], affected: [] };
     }
 
     /** @param {number} dt */
@@ -138,9 +190,23 @@ export class PowerUpManager {
         }
     }
 
+    /**
+     * Combined growth multiplier from active growth_scale effects (strongest wins).
+     * @returns {number}
+     */
+    getGrowthScale() {
+        let scale = 1;
+        for (const t of this.activeTimers) {
+            if (t.remainingMs <= 0) continue;
+            const effect = POWER_UPS[t.typeId]?.effect;
+            if (effect?.kind === 'growth_scale') scale = Math.min(scale, effect.scale ?? 1);
+        }
+        return scale;
+    }
+
     /** @returns {boolean} */
     isGrowthFrozen() {
-        return this.activeTimers.some(t => t.typeId === POWER_UP_TYPES.FREEZE && t.remainingMs > 0);
+        return this.getGrowthScale() === 0;
     }
 
     /** @param {string} typeId @returns {PowerUpDefinition | undefined} */
@@ -186,7 +252,7 @@ export class PowerUpManager {
         return slots;
     }
 
-    /** @returns {number} */
+    /** @param {string} typeId @returns {number} */
     getHeldCount(typeId) {
         return this.held[typeId] || 0;
     }

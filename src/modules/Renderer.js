@@ -186,6 +186,7 @@ export class Renderer {
         cave.drawCaveWallOverlays(gameState, timestamp);
         hud.drawHoloGrid(gameState, launcher, profile, timestamp);
         hud.drawTargetingSystem(gameState, launcher, timestamp);
+        hud.drawLaneHazards(gameState, timestamp);
         hud.drawBossEncounter(gameState, timestamp);
 
         for (let i = 0; i < gameState.crystals.length; i++) {

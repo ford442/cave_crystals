@@ -354,6 +354,13 @@ export const SoundManager = {
         this.scheduleTone(1320, 'sine', 0.25, 0.1, 0.08, this.sfxGain);
     },
 
+    /** Lane hazard telegraph — two quick descending pings. */
+    hazardWarning() {
+        if (!this.ctx) return;
+        this.scheduleTone(660, 'square', 0.12, 0.07, 0, this.sfxGain);
+        this.scheduleTone(440, 'square', 0.12, 0.07, 0.11, this.sfxGain);
+    },
+
     /** Boss intro / telegraph sting — low brass-like stack with a rising edge. */
     bossSting() {
         if (!this.ctx || !this.uiGain) return;

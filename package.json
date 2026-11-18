@@ -30,12 +30,13 @@
     "test:lint": "node --test test/lint/*.test.mjs",
     "test:unit": "npm run asbuild:debug && node --test test/wasm/*.test.mjs",
     "test:wasm": "npm run asbuild:release && WASM_BUILD=release node --test test/wasm/*.test.mjs",
+    "test:content": "node --test test/content/*.test.mjs",
     "test:powerups": "node --test test/powerups/*.test.mjs",
     "test:audio": "node --test test/audio/*.test.mjs",
     "test:game": "node --test test/game/*.test.mjs",
     "test:replay": "node --test test/game/replay.test.mjs",
     "test:save": "node --test test/save/*.test.mjs",
-    "test:ci": "npm run lint && npm run typecheck && npm run test:lint && npm run test:unit && npm run test:powerups && npm run test:audio && npm run test:game && npm run test:save && node --test test/scripts/ci-gate.test.mjs"
+    "test:ci": "npm run lint && npm run typecheck && npm run test:lint && npm run test:unit && npm run test:content && npm run test:powerups && npm run test:audio && npm run test:game && npm run test:save && node --test test/scripts/ci-gate.test.mjs"
   },
   "keywords": [],
   "author": "",

@@ -29,6 +29,7 @@ The project emphasizes "game juice" — extensive screen shake, chromatic aberra
 ├── plan.md               # Game enhancement plan (feature backlog)
 ├── src/
 │   ├── main.js           # App entry point: imports Game class
+│   ├── data/             # Authored content: campaign.json, powerups.json, bosses.json (see docs/CONTENT.md)
 │   ├── style.css         # UI styles, HUD, responsive layout
 │   ├── assets/
 │   │   └── background.png
@@ -40,7 +41,9 @@ The project emphasizes "game juice" — extensive screen shake, chromatic aberra
 │   │   ├── Audio.js          # SoundManager (Web Audio API)
 │   │   ├── WasmManager.js    # WASM loader with JS fallbacks for every export
 │   │   ├── Background.js     # DOM image background
-│   │   └── Constants.js      # Color palette and game constants
+│   │   ├── Constants.js      # Color palette and game constants
+│   │   ├── HazardController.js # Data-driven lane hazards (overgrowth, tremor, color_shift)
+│   │   └── content/          # ContentRegistry (load + validate + freeze) and validateContent
 │   └── assembly/
 │       ├── index.ts          # WASM module entry / re-exports
 │       ├── collision.ts      # Collision detection with bit flags
@@ -165,7 +168,7 @@ Two GitHub Actions workflows run on every push to `main` and on pull requests (n
 
 | Workflow | What it gates |
 |----------|---------------|
-| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | `npm run test:ci` — ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), debug WASM unit tests (`test:unit`), power-ups (`test:powerups`), audio (`test:audio`), game (`test:game`, includes replay), save (`test:save`), and `test/scripts/ci-gate.test.mjs` (script/workflow agreement) |
+| [`.github/workflows/lint.yml`](.github/workflows/lint.yml) | `npm run test:ci` — ESLint, TypeScript (`tsc --noEmit`), lint regression fixtures (`test:lint`), debug WASM unit tests (`test:unit`), content validation (`test:content`), power-ups (`test:powerups`), audio (`test:audio`), game (`test:game`, includes replay), save (`test:save`), and `test/scripts/ci-gate.test.mjs` (script/workflow agreement) |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Release production build (`npm run build`) + Playwright smoke (`verify:smoke`) + PWA offline (`verify:pwa`) + post-FX/context assertions (`verify:postfx`) + visual regression (`verify:visual`) — all blocking |
 
 The blocking jobs are one local command: `npm run verify:ci` (`test:ci`, then `build`, `verify:smoke`, `verify:pwa`, `verify:postfx`, and `verify:visual`). `test:replay` is not a separate step because `test:game` already runs `test/game/*.test.mjs`. `test:wasm` stays on demand so the merge gate's assertion/source-map build is the debug target only.
@@ -467,6 +470,7 @@ Visual-only particle integration (trail, dust, aura/ember) can run on a **Dedica
 
 ## Common Tasks for Agents
 
+- **Add a level, arc, power-up variant, hazard or boss**: edit `src/data/*.json`. No code is needed if you reuse an existing effect or hazard kind. Content is validated when it loads, and `npm run test:content` reports every problem with its path. See [`docs/CONTENT.md`](docs/CONTENT.md).
 - **Add a new color**: Update `COLORS` in `src/modules/Constants.js`. Ensure `GAME_CONFIG.lanes` and renderer logic handle the palette size.
 - **Add a new particle type**: Add the class/type in `src/modules/Entities.js`, update the particle update/render logic in `Game.js` and `Renderer.js`. If it spawns frequently, consider adding it to the `ParticlePool` in `Game.js`.
 - **Add a new WASM function**: Write it in the appropriate `src/assembly/*.ts` file, re-export from `index.ts`, add a wrapper + JS fallback in `WasmManager.js`, add the name to `WASM_MANAGER_WASM_EXPORTS`, then call it from `Game.js` or `Entities.js`.

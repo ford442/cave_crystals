@@ -1,4 +1,7 @@
-/** @import { LevelDefinition, GameMode, ObjectiveType } from './types.js' */
+// @ts-check
+/** @import { CampaignArc, LevelDefinition, LevelRuntimeConfig, GameMode, ObjectiveType } from './types.js' */
+
+import { CONTENT } from './content/ContentRegistry.js';
 
 /** @type {Readonly<Record<'SCORE' | 'SURVIVAL' | 'STREAK' | 'CLEARANCE', ObjectiveType>>} */
 export const OBJECTIVE_TYPES = {
@@ -8,75 +11,42 @@ export const OBJECTIVE_TYPES = {
     CLEARANCE: 'clearance',
 };
 
-/** @type {Record<string, GameMode>} */
+/** @type {Readonly<Record<'CAMPAIGN' | 'ENDLESS', GameMode>>} */
 export const GAME_MODES = {
     CAMPAIGN: 'campaign',
     ENDLESS: 'endless',
 };
 
 /**
- * Data-driven level definitions. Rules live here — not in Game.js.
- * @type {LevelDefinition[]}
+ * Campaign arcs, authored in `src/data/campaign.json` (validated on load).
+ * @type {readonly CampaignArc[]}
  */
-export const LEVELS = [
-    {
-        id: 1,
-        name: 'Crystal Awakening',
-        lanes: 5,
-        colorCount: 3,
-        crystalHeight: { min: 20, max: 50 },
-        growth: { baseMultiplier: 0.75, scoreDivisor: 1000 },
-        objective: { type: OBJECTIVE_TYPES.SCORE, target: 300 },
-        description: 'Score 300 points',
-    },
-    {
-        id: 2,
-        name: 'Narrow Passage',
-        lanes: 4,
-        colorCount: 3,
-        crystalHeight: { min: 30, max: 70 },
-        growth: { baseMultiplier: 0.9, scoreDivisor: 900 },
-        objective: { type: OBJECTIVE_TYPES.SURVIVAL, target: 45 },
-        description: 'Survive 45 seconds',
-    },
-    {
-        id: 3,
-        name: 'Perfect Harmony',
-        lanes: 6,
-        colorCount: 4,
-        crystalHeight: { min: 25, max: 60 },
-        growth: { baseMultiplier: 1.0, scoreDivisor: 700 },
-        objective: { type: OBJECTIVE_TYPES.STREAK, target: 8 },
-        description: 'Hit an 8-match streak',
-    },
-    {
-        id: 4,
-        name: 'Deep Clearance',
-        lanes: 6,
-        colorCount: 4,
-        crystalHeight: { min: 50, max: 90 },
-        growth: { baseMultiplier: 1.1, scoreDivisor: 600 },
-        objective: { type: OBJECTIVE_TYPES.CLEARANCE, target: 35 },
-        description: 'Shrink all crystals below 35px',
-    },
-    {
-        id: 5,
-        name: 'The Convergence',
-        lanes: 7,
-        colorCount: 5,
-        crystalHeight: { min: 40, max: 70 },
-        growth: { baseMultiplier: 1.25, scoreDivisor: 450 },
-        objective: { type: OBJECTIVE_TYPES.SCORE, target: 800 },
-        description: 'Defeat The Convergence',
-        bossId: 'convergence',
-    },
-];
+export const ARCS = CONTENT.arcs;
+
+/**
+ * Every campaign level in play order, flattened across arcs.
+ * @type {readonly LevelDefinition[]}
+ */
+export const LEVELS = CONTENT.levels;
 
 /** Endless mode tuning — separate from campaign levels. */
-/** @type {import('./types.js').LevelRuntimeConfig} */
-export const ENDLESS_CONFIG = {
-    lanes: 7,
-    colorCount: 5,
-    crystalHeight: { min: 20, max: 60 },
-    growth: { baseMultiplier: 1.0, scoreDivisor: 500 },
-};
+/** @type {LevelRuntimeConfig} */
+export const ENDLESS_CONFIG = CONTENT.endless;
+
+/**
+ * @param {number} levelId
+ * @returns {CampaignArc | null}
+ */
+export function getArcForLevelId(levelId) {
+    const arcId = CONTENT.arcIdByLevelId.get(levelId);
+    return ARCS.find(a => a.id === arcId) || null;
+}
+
+/**
+ * Campaign index (0-based) of the level that hosts `bossId`, or -1.
+ * @param {string} bossId
+ * @returns {number}
+ */
+export function getLevelIndexForBoss(bossId) {
+    return LEVELS.findIndex(l => l.bossId === bossId);
+}
